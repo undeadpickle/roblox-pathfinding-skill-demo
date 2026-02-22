@@ -49,28 +49,55 @@ GameConfig.SOUNDS = table.freeze({
 	-- UI_HOVER = "rbxassetid://0",
 })
 
---[[
-	Registry Pattern Example:
-	
-	Use string attributes on instances to drive behavior.
-	Set an attribute like "InteractionType" = "collect" on a Part,
-	then look up the config here.
-	
-	Example usage in code:
-		local config = GameConfig.getInteractionConfig(part:GetAttribute("InteractionType"))
-		if config then
-			-- use config.points, config.sound, etc.
-		end
-]]
-GameConfig.INTERACTIONS = table.freeze({
-	-- Example entries - customize for your game:
-	-- button = table.freeze({ sound = "Click", cooldown = 0.5 }),
-	-- portal = table.freeze({ destination = "Spawn" }),
-})
+-- NPC pathfinding configuration
+GameConfig.NPC = table.freeze({
+	COLLISION_GROUP = "NPCs",
 
---- Get interaction config by type name
-function GameConfig.getInteractionConfig(typeName: string): { [string]: any }?
-	return GameConfig.INTERACTIONS[typeName]
-end
+	-- PathfindingService agent parameters (R15 humanoid)
+	AGENT = table.freeze({
+		AgentRadius = 2,
+		AgentHeight = 5,
+		AgentCanJump = true,
+		WaypointSpacing = 4,
+	}),
+
+	-- Spawn positions on the default baseplate
+	SPAWN_POSITIONS = table.freeze({
+		CHASE = Vector3.new(30, 5, 0),
+		PATROL = Vector3.new(-30, 5, 0),
+		WANDER = Vector3.new(0, 5, -30),
+	}),
+
+	-- Chase NPC: pursues nearest player
+	CHASE = table.freeze({
+		DISPLAY_NAME = "Chase NPC",
+		DETECTION_RADIUS = 50,
+		RECOMPUTE_INTERVAL = 0.5,
+		ARRIVAL_DISTANCE = 5,
+		REEVALUATE_INTERVAL = 3,
+	}),
+
+	-- Patrol NPC: walks a rectangular route
+	PATROL = table.freeze({
+		DISPLAY_NAME = "Patrol NPC",
+		WAIT_TIME = 2,
+		LOOP_MODE = "loop",
+		WAYPOINTS = table.freeze({
+			Vector3.new(-30, 5, -20),
+			Vector3.new(-50, 5, -20),
+			Vector3.new(-50, 5, 20),
+			Vector3.new(-30, 5, 20),
+		}),
+	}),
+
+	-- Wander NPC: roams randomly within a radius
+	WANDER = table.freeze({
+		DISPLAY_NAME = "Wander NPC",
+		CENTER = Vector3.new(0, 5, -30),
+		RADIUS = 25,
+		PAUSE_MIN = 1,
+		PAUSE_MAX = 3,
+	}),
+})
 
 return GameConfig

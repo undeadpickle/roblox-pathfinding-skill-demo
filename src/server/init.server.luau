@@ -40,8 +40,9 @@ local success, err = pcall(function()
 			task.spawn(onPlayerAdded, player)
 		end
 
-		-- TODO: Initialize server systems
-		-- Example: require(script.modules.DataManager).init()
+		-- Initialize NPC pathfinding system
+		local NPCManager = require(script.modules.NPCManager)
+		NPCManager.initialize()
 	end
 
 	initialize()

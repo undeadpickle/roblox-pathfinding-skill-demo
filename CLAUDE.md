@@ -2,7 +2,7 @@
 
 ## Overview
 
-Brief description of what this project does.
+NPC pathfinding demo showcasing chase, patrol, and wander behaviors using PathfindingService.
 
 > Generated with roblox-dev skill v1.1.0
 
@@ -55,12 +55,17 @@ Brief description of what this project does.
 - `Packages/` — Wally dependencies (auto-generated, don't edit)
 
 ### Key Modules
-- `GameConfig` — Central configuration values
+- `GameConfig` — Central configuration values (includes NPC config)
 - `Remotes` — Client-server communication helpers
 - `Logger` — Debug logging with [Server]/[Client] prefixes
+- `NPCPathfinder` — PathfindingService wrapper with moveTo, patrol, followTarget, wander
+- `NPCManager` — Spawns NPCs, assigns behaviors (chase/patrol/wander), manages lifecycle
 
-### Genre-Specific Systems (to build)
-_No game type selected — add your custom systems here as you design the game loop._
+### NPC Pathfinding System
+- 3 demo NPCs: Chase (follows nearest player), Patrol (loops waypoints), Wander (random points in radius)
+- R15 rigs created at runtime via `Players:CreateHumanoidModelFromDescription()`
+- Server-authoritative: `SetNetworkOwner(nil)` on all NPC parts
+- Collision group "NPCs" prevents NPC-to-NPC physics jitter
 
 ## Development Workflow
 
@@ -69,11 +74,18 @@ _No game type selected — add your custom systems here as you design the game l
 rojo serve
 
 # In Studio: Rojo plugin > Connect
+# If files don't appear, verify sync via MCP (run_code) before debugging code
 
 # Before committing
 selene src/
 stylua --check src/
 ```
+
+### MCP Servers
+- **Official** (`roblox-studio`): `mcp__roblox-studio__run_code` / `insert_model` — primary tool
+- **boshyxd** (`robloxstudio`): HTTP API at `localhost:3003/mcp/*` — health check: `curl localhost:3003/health`
+  - Useful for: `get_project_structure`, `search_objects`, `get_script_source`, `mass_set_property`
+  - Does NOT register tools in Claude Code — use via `curl` only
 
 ## Documentation
 
