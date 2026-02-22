@@ -1,6 +1,6 @@
 {
   "name": "RobloxPathfindingSkillDemo",
-  "servePlaceIds": [],
+  "servePlaceIds": [105075058557529],
   "tree": {
     "$className": "DataModel",
     "ReplicatedFirst": {
