@@ -1,0 +1,50 @@
+# Roblox files
+*.rbxl
+*.rbxlx
+*.rbxm
+*.rbxmx
+*.rbxl.lock
+
+# Dependencies
+Packages/
+!Packages/.gitkeep
+ServerPackages/
+!ServerPackages/.gitkeep
+node_modules/
+
+# Build artifacts
+sourcemap.json
+*.sourcemap.json
+build/
+dist/
+
+# Environment
+.env
+.env.local
+.env.*.local
+secrets.luau
+
+# Rokit
+.rokit/bin/
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor
+*.swp
+*.swo
+*~
+.idea/
+*.sublime-*
+.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/extensions.json
+
+# MCP
+RobloxStudioMCP.app/
+
+# Test output
+coverage/
+*.spec.snap

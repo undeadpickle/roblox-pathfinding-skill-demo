@@ -1,0 +1,8 @@
+{
+  "languageMode": "strict",
+  "aliases": {
+    "Packages": "./Packages",
+    "ServerPackages": "./ServerPackages",
+    "DevPackages": "./DevPackages"
+  }
+}

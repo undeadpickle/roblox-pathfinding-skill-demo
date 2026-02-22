@@ -1,0 +1,57 @@
+{
+  "name": "RobloxPathfindingSkillDemo",
+  "servePlaceIds": [],
+  "tree": {
+    "$className": "DataModel",
+    "ReplicatedFirst": {
+      "$path": "src/replicatedFirst",
+      "$ignoreUnknownInstances": true
+    },
+    "ReplicatedStorage": {
+      "Shared": {
+        "$path": "src/shared"
+      },
+      "Packages": {
+        "$path": "Packages"
+      },
+      "$ignoreUnknownInstances": true
+    },
+    "ServerScriptService": {
+      "Server": {
+        "$path": "src/server"
+      },
+      "$ignoreUnknownInstances": true
+    },
+    "ServerStorage": {
+      "$ignoreUnknownInstances": true
+    },
+    "StarterPlayer": {
+      "StarterPlayerScripts": {
+        "Client": {
+          "$path": "src/client"
+        }
+      },
+      "StarterCharacterScripts": {
+        "$ignoreUnknownInstances": true
+      },
+      "$ignoreUnknownInstances": true
+    },
+    "StarterGui": {
+      "$ignoreUnknownInstances": true
+    },
+    "SoundService": {
+      "$ignoreUnknownInstances": true
+    },
+    "Workspace": {
+      "$ignoreUnknownInstances": true
+    },
+    "Lighting": {
+      "$properties": {
+        "Ambient": [0.5, 0.5, 0.5],
+        "Brightness": 2,
+        "GlobalShadows": true
+      },
+      "$ignoreUnknownInstances": true
+    }
+  }
+}

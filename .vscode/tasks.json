@@ -1,0 +1,54 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Rojo Serve",
+      "type": "shell",
+      "command": "rojo serve",
+      "problemMatcher": [],
+      "isBackground": true,
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      }
+    },
+    {
+      "label": "Wally Install",
+      "type": "shell",
+      "command": "wally install",
+      "problemMatcher": []
+    },
+    {
+      "label": "Lint (Selene)",
+      "type": "shell",
+      "command": "selene src/",
+      "problemMatcher": []
+    },
+    {
+      "label": "Format (StyLua)",
+      "type": "shell",
+      "command": "stylua src/",
+      "problemMatcher": []
+    },
+    {
+      "label": "Run Tests (Lune)",
+      "type": "shell",
+      "command": "lune run scripts/run-tests.luau",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      }
+    },
+    {
+      "label": "Run Tests (Studio)",
+      "type": "shell",
+      "command": "run-in-roblox --place game.rbxl --script scripts/run-tests.luau",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      }
+    }
+  ]
+}

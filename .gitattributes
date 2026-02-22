@@ -1,0 +1,31 @@
+# Auto detect text files and perform LF normalization
+* text=auto
+
+# Luau files
+*.luau text eol=lf
+*.lua text eol=lf
+
+# Config files
+*.json text eol=lf
+*.toml text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+
+# Markdown
+*.md text eol=lf
+
+# Roblox binary files
+*.rbxl binary
+*.rbxlx binary
+*.rbxm binary
+*.rbxmx binary
+
+# Images
+*.png binary
+*.jpg binary
+*.jpeg binary
+
+# Audio
+*.mp3 binary
+*.ogg binary
+*.wav binary
