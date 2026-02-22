@@ -118,4 +118,8 @@ Format: `- [Category] Brief description of what doesn't work and what to do inst
 - **[Types] Module field annotations** — Use `Module.field = {} :: Type` not `Module.field: Type = {}`
 - **[Types] Private fields in classes** — Define internal impl type (`type FooImpl = { _field: T? }`) and use in constructor: `local self: FooImpl = setmetatable({} :: any, Foo)`
 
-<!-- Add project-specific learnings below -->
+### PathfindingService Gotchas
+
+- **[Pathfinding] GetWaypoints() waypoint 1 is start position** — Always skip index 1 and start traversal from index 2. Waypoint 1 has the same XZ as the NPC but at navmesh height (Y=0), causing 3D distance checks to fail (hip height Y mismatch). `MoveToFinished:Wait()` doesn't have this problem (it ignores Y).
+- **[Pathfinding] SpawnLocation blocks NPC movement** — Default `CanCollide = true` makes it a physical wall. Set `CanCollide = false`; spawning uses `Enabled`, not collision.
+- **[Pathfinding] PathfindingUseImprovedSearch** — Not scriptable. Must be set manually in Studio: Workspace > Properties > Enabled.

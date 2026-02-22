@@ -30,3 +30,13 @@
 - **[Architecture]** Don't adapt a skill asset module without tracing all method call graphs first. The `moveTo` → `stop` → `task.cancel` self-reference was only visible by reading the full method chain.
 
 - **[Debug]** Don't assume rapid-fire repeated log messages are a logic error in a loop. Check for stale signals/events first — a `MoveToFinished` fired by `MoveTo(currentPos)` was being caught by subsequent `:Wait()` calls.
+
+## Session: 2026-02-22 — NPC Playtest & Bug Fixes
+
+- **[Roblox]** Don't start waypoint traversal at index 1 from `GetWaypoints()`. Waypoint 1 is always the NPC's current position. Start from index 2 to avoid getting stuck on a same-XZ waypoint where Y mismatch (navmesh height vs hip height) fails distance checks.
+
+- **[Roblox]** Don't mix `MoveToFinished:Wait()` and manual 3D distance checks for waypoint arrival. `MoveToFinished` resolves on XZ distance only (ignoring Y), while `Vector3.Magnitude` includes Y. A waypoint directly below the NPC (same XZ, different Y) passes `MoveToFinished` instantly but fails a 3D distance threshold.
+
+- **[Roblox]** Don't leave `SpawnLocation.CanCollide = true` when NPCs path through the spawn area. SpawnLocation is a physical part that blocks movement. Spawning behavior uses the `Enabled` property, not `CanCollide` — safe to disable collision.
+
+- **[MCP]** Don't ask users to paste console output. Use `LogService:GetLogHistory()` via MCP `run_code` to read server logs from edit mode, even after play mode ends. Faster and more complete than screenshots.

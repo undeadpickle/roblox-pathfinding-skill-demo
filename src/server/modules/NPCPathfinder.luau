@@ -449,7 +449,10 @@ function NPCPathfinder:_computePath(targetPosition: Vector3): boolean
 
 	if self._path.Status == Enum.PathStatus.Success or self._path.Status == Enum.PathStatus.ClosestNoPath then
 		self._waypoints = self._path:GetWaypoints()
-		self._currentWaypointIndex = 1
+		-- Skip waypoint 1 (start position) — it's always at the NPC's current XZ,
+		-- and the Y mismatch (navmesh vs HumanoidRootPart hip height) causes
+		-- _traverseWaypointsNonBlocking's distance polling to get stuck.
+		self._currentWaypointIndex = if #self._waypoints >= 2 then 2 else 1
 		return true
 	end
 

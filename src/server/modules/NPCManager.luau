@@ -219,8 +219,75 @@ local function startChaseBehavior(entry: NPCEntry): ()
 	end)
 end
 
+local function createWaypointMarkers(waypoints: { Vector3 }): Folder
+	local folder = Instance.new("Folder")
+	folder.Name = "PatrolWaypointMarkers"
+
+	for i, wp in waypoints do
+		-- Marker sphere at each waypoint
+		local marker = Instance.new("Part")
+		marker.Name = `Waypoint_{i}`
+		marker.Shape = Enum.PartType.Ball
+		marker.Size = Vector3.new(2, 2, 2)
+		marker.Position = wp
+		marker.Anchored = true
+		marker.CanCollide = false
+		marker.CanTouch = false
+		marker.CanQuery = false
+		marker.Material = Enum.Material.Neon
+		marker.Color = Color3.fromRGB(250, 204, 21) -- Yellow
+		marker.Transparency = 0.5
+
+		-- Number label
+		local billboard = Instance.new("BillboardGui")
+		billboard.Size = UDim2.fromOffset(40, 40)
+		billboard.StudsOffset = Vector3.new(0, 2, 0)
+		billboard.AlwaysOnTop = true
+
+		local label = Instance.new("TextLabel")
+		label.Size = UDim2.fromScale(1, 1)
+		label.BackgroundTransparency = 1
+		label.Text = tostring(i)
+		label.TextColor3 = Color3.fromRGB(250, 204, 21)
+		label.TextStrokeTransparency = 0
+		label.Font = Enum.Font.GothamBold
+		label.TextScaled = true
+		label.Parent = billboard
+
+		billboard.Parent = marker
+		marker.Parent = folder
+
+		-- Line to next waypoint
+		local nextIndex = (i % #waypoints) + 1
+		local nextWp = waypoints[nextIndex]
+		local midpoint = (wp + nextWp) / 2
+		local direction = nextWp - wp
+
+		local line = Instance.new("Part")
+		line.Name = `Line_{i}_to_{nextIndex}`
+		line.Size = Vector3.new(0.2, 0.2, direction.Magnitude)
+		line.CFrame = CFrame.lookAt(midpoint, nextWp)
+		line.Anchored = true
+		line.CanCollide = false
+		line.CanTouch = false
+		line.CanQuery = false
+		line.Material = Enum.Material.Neon
+		line.Color = Color3.fromRGB(250, 204, 21)
+		line.Transparency = 0.7
+		line.Parent = folder
+	end
+
+	folder.Parent = Workspace
+	return folder
+end
+
 local function startPatrolBehavior(entry: NPCEntry): ()
 	local config = GameConfig.NPC.PATROL
+
+	-- Show waypoint markers in debug mode
+	if GameConfig.GAME.DEBUG then
+		createWaypointMarkers(config.WAYPOINTS)
+	end
 
 	entry.pathfinder:patrol(config.WAYPOINTS, {
 		loopMode = config.LOOP_MODE,
@@ -266,16 +333,6 @@ end
 
 function NPCManager.initialize(): ()
 	log:info("Initializing NPC system...")
-
-	-- Enable improved pathfinding algorithm (fixes zig-zagging and wall-hugging)
-	local pathfindingEnabled = pcall(function()
-		(Workspace :: any).PathfindingUseImprovedSearch = true
-	end)
-	if not pathfindingEnabled then
-		log:warn(
-			"Could not enable PathfindingUseImprovedSearch via script. Enable it manually in Studio: Workspace > Properties > PathfindingUseImprovedSearch"
-		)
-	end
 
 	-- Spawn all demo NPCs
 	local positions = GameConfig.NPC.SPAWN_POSITIONS
