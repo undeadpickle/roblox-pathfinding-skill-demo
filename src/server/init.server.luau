@@ -43,6 +43,11 @@ local success, err = pcall(function()
 		-- Initialize NPC pathfinding system
 		local NPCManager = require(script.modules.NPCManager)
 		NPCManager.initialize()
+
+		-- Clean up NPC threads and instances on server shutdown
+		game:BindToClose(function()
+			NPCManager.cleanup()
+		end)
 	end
 
 	initialize()

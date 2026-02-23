@@ -214,6 +214,11 @@ function NPCPathfinder:followTarget(target: Model, options: { [string]: any }?)
 			end
 
 			task.wait(recomputeInterval)
+
+			-- Model may have been destroyed during the wait
+			if not self._rootPart or not self._model or not self._model:IsDescendantOf(game) then
+				break
+			end
 		end
 
 		self._isMoving = false
