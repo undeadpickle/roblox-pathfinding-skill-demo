@@ -36,6 +36,7 @@ type NPCEntry = {
 	stateMachine: any,
 	behaviorType: string,
 	debugFolder: Folder?,
+	stateLabel: TextLabel?,
 	-- Chase state fields (populated by state hooks)
 	chaseTarget: Model?,
 	chaseReevalTimer: number?,
@@ -132,6 +133,56 @@ local function createNPCModel(displayName: string, spawnPosition: Vector3): Mode
 	model.Parent = Workspace
 
 	return model
+end
+
+-- ═══════════════════════════════════════════════════════════
+-- DEBUG STATE LABELS
+-- ═══════════════════════════════════════════════════════════
+
+local function createStateLabel(model: Model): TextLabel?
+	if not GameConfig.GAME.DEBUG then
+		return nil
+	end
+
+	local head = model:FindFirstChild("Head")
+	if not head or not head:IsA("BasePart") then
+		return nil
+	end
+
+	local config = GameConfig.NPC.STATE_LABEL
+
+	local billboard = Instance.new("BillboardGui")
+	billboard.Name = "StateLabelGui"
+	billboard.Size = config.SIZE
+	billboard.StudsOffset = config.STUDS_OFFSET
+	billboard.AlwaysOnTop = true
+
+	local label = Instance.new("TextLabel")
+	label.Name = "StateLabel"
+	label.Size = UDim2.fromScale(1, 1)
+	label.BackgroundTransparency = 1
+	label.Text = ""
+	label.TextColor3 = config.DEFAULT_COLOR
+	label.TextStrokeTransparency = config.STROKE_TRANSPARENCY
+	label.Font = config.FONT
+	label.TextSize = config.TEXT_SIZE
+	label.Parent = billboard
+
+	billboard.Parent = head
+
+	return label
+end
+
+local function makeStateLabelUpdater(stateLabel: TextLabel?): ((newState: string, previousState: string?) -> ())?
+	if not stateLabel then
+		return nil
+	end
+	local colors = GameConfig.NPC.STATE_LABEL.COLORS
+	local defaultColor = GameConfig.NPC.STATE_LABEL.DEFAULT_COLOR
+	return function(newState: string, _previousState: string?)
+		stateLabel.Text = newState
+		stateLabel.TextColor3 = colors[newState] or defaultColor
+	end
 end
 
 -- ═══════════════════════════════════════════════════════════
@@ -482,11 +533,15 @@ function NPCManager.initialize(): ()
 
 	-- Attach state machines — each starts in its initial state (onEnter fires immediately)
 	if patrolEntry then
-		patrolEntry.stateMachine = NPCStateMachine.new("Patrolling", PATROL_STATES, patrolEntry)
+		patrolEntry.stateLabel = createStateLabel(patrolEntry.model)
+		patrolEntry.stateMachine =
+			NPCStateMachine.new("Patrolling", PATROL_STATES, patrolEntry, makeStateLabelUpdater(patrolEntry.stateLabel))
 	end
 
 	if wanderEntry then
-		wanderEntry.stateMachine = NPCStateMachine.new("Wandering", WANDER_STATES, wanderEntry)
+		wanderEntry.stateLabel = createStateLabel(wanderEntry.model)
+		wanderEntry.stateMachine =
+			NPCStateMachine.new("Wandering", WANDER_STATES, wanderEntry, makeStateLabelUpdater(wanderEntry.stateLabel))
 	end
 
 	if chaseEntry then
@@ -495,7 +550,9 @@ function NPCManager.initialize(): ()
 			humanoid.WalkSpeed = GameConfig.NPC.CHASE.WALK_SPEED
 		end
 		-- Chase starts Idle — transitions to Chasing when a player enters detection radius
-		chaseEntry.stateMachine = NPCStateMachine.new("Idle", CHASE_STATES, chaseEntry)
+		chaseEntry.stateLabel = createStateLabel(chaseEntry.model)
+		chaseEntry.stateMachine =
+			NPCStateMachine.new("Idle", CHASE_STATES, chaseEntry, makeStateLabelUpdater(chaseEntry.stateLabel))
 	end
 
 	-- Single tick loop for all state machines

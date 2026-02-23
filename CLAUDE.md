@@ -60,7 +60,7 @@ NPC pathfinding demo showcasing chase, patrol, and wander behaviors using Pathfi
 - `Logger` — Debug logging with [Server]/[Client] prefixes
 - `MapSetup` — Config-driven obstacle geometry spawner (reads `GameConfig.MAP.OBSTACLES`)
 - `NPCPathfinder` — PathfindingService wrapper with moveTo, patrol, followTarget, wander
-- `NPCStateMachine` — Generic finite state machine (shared, reusable for any system)
+- `NPCStateMachine` — Generic finite state machine (shared, reusable for any system). Optional `onStateChanged` callback (4th param) fires on initial state and every transition.
 - `NPCManager` — Spawns NPCs, wires state machines to pathfinder, manages lifecycle
 
 ### NPC Pathfinding System
@@ -71,6 +71,7 @@ NPC pathfinding demo showcasing chase, patrol, and wander behaviors using Pathfi
 - Server-authoritative: `SetNetworkOwner(nil)` on all NPC parts
 - Collision group "NPCs" prevents NPC-to-NPC physics jitter
 - `game:BindToClose` ensures cleanup on server shutdown
+- Debug state labels (BillboardGui) above NPC heads show current state with color coding, gated by `GameConfig.GAME.DEBUG`
 
 ### Map & Obstacles
 - Obstacle geometry defined in `GameConfig.MAP.OBSTACLES` (position, size, color per obstacle)

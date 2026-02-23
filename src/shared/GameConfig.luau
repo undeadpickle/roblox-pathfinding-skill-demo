@@ -196,6 +196,22 @@ GameConfig.NPC = table.freeze({
 		PAUSE_MIN = 1,
 		PAUSE_MAX = 3,
 	}),
+
+	-- Debug state labels above NPC heads (gated by GAME.DEBUG)
+	STATE_LABEL = table.freeze({
+		SIZE = UDim2.fromOffset(200, 30),
+		STUDS_OFFSET = Vector3.new(0, 4.5, 0),
+		TEXT_SIZE = 14,
+		FONT = Enum.Font.GothamBold,
+		STROKE_TRANSPARENCY = 0,
+		COLORS = table.freeze({
+			Idle = Color3.fromRGB(250, 204, 21), -- Yellow (passive)
+			Chasing = Color3.fromRGB(239, 68, 68), -- Red (active pursuit)
+			Patrolling = Color3.fromRGB(59, 130, 246), -- Blue (routine)
+			Wandering = Color3.fromRGB(34, 197, 94), -- Green (exploratory)
+		}),
+		DEFAULT_COLOR = Color3.fromRGB(200, 200, 200),
+	}),
 })
 
 return GameConfig

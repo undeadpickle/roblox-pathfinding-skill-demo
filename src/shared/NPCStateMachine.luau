@@ -56,7 +56,12 @@ export type StateDefinition = {
 
 export type StateMap = { [string]: StateDefinition }
 
-function NPCStateMachine.new(initialState: string, states: StateMap, context: any)
+function NPCStateMachine.new(
+	initialState: string,
+	states: StateMap,
+	context: any,
+	onStateChanged: ((newState: string, previousState: string?) -> ())?
+)
 	assert(states[initialState], `NPCStateMachine: initial state "{initialState}" not found in state map`)
 
 	local self = setmetatable({}, NPCStateMachine)
@@ -64,11 +69,17 @@ function NPCStateMachine.new(initialState: string, states: StateMap, context: an
 	self._states = states
 	self._context = context
 	self._isDestroyed = false
+	self._onStateChanged = onStateChanged
 
 	-- Enter the initial state immediately so the NPC starts doing something on frame 1
 	local initial = states[initialState]
 	if initial.onEnter then
 		initial.onEnter(context)
+	end
+
+	-- Notify listener of initial state (previousState is nil for first state)
+	if onStateChanged then
+		onStateChanged(initialState, nil)
 	end
 
 	return self
@@ -121,6 +132,11 @@ function NPCStateMachine:transitionTo(stateName: string): ()
 		nextState.onEnter(self._context)
 	end
 
+	-- Notify listener of state change
+	if self._onStateChanged then
+		self._onStateChanged(stateName, previousName)
+	end
+
 	-- Log transitions (context.model.Name is NPC-specific but useful for debugging)
 	-- NOTE: This assumes context has a .model with .Name — fine for this project.
 	-- A fully generic version would take a label string in the constructor.
@@ -150,6 +166,7 @@ function NPCStateMachine:destroy(): ()
 	-- Clear references for GC
 	self._states = nil :: any
 	self._context = nil
+	self._onStateChanged = nil
 end
 
 return NPCStateMachine
