@@ -7,18 +7,24 @@
 	  - Patrol NPC: walks a rectangular loop
 	  - Wander NPC: roams randomly within a radius
 
+	Each NPC is driven by a state machine (NPCStateMachine) that manages behavior
+	transitions. The state machine ticks via a single RunService.PostSimulation
+	connection — states call into NPCPathfinder methods for actual movement.
+
 	NPCs are created as R15 rigs via Players:CreateHumanoidModelFromDescription().
 	Falls back to simple Part+Humanoid if R15 creation fails.
 ]]
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local GameConfig = require(Shared.GameConfig)
 local Logger = require(Shared.Logger)
 local NPCPathfinder = require(script.Parent.NPCPathfinder)
+local NPCStateMachine = require(Shared.NPCStateMachine)
 
 local log = Logger.new("NPCManager")
 
@@ -27,11 +33,18 @@ local NPCManager = {}
 type NPCEntry = {
 	model: Model,
 	pathfinder: any,
-	behaviorThread: thread?,
+	stateMachine: any,
 	behaviorType: string,
+	debugFolder: Folder?,
+	-- Chase state fields (populated by state hooks)
+	chaseTarget: Model?,
+	chaseReevalTimer: number?,
+	-- Wander state fields (populated by state hooks)
+	wanderThread: thread?,
 }
 
 local activeNPCs: { [string]: NPCEntry } = {}
+local moduleConnections: { RBXScriptConnection } = {}
 
 -- ═══════════════════════════════════════════════════════════
 -- NPC CREATION
@@ -144,7 +157,7 @@ local function spawnNPC(behaviorType: string, displayName: string, spawnPosition
 	local entry: NPCEntry = {
 		model = model,
 		pathfinder = pathfinder,
-		behaviorThread = nil,
+		stateMachine = nil :: any,
 		behaviorType = behaviorType,
 	}
 
@@ -154,7 +167,7 @@ local function spawnNPC(behaviorType: string, displayName: string, spawnPosition
 end
 
 -- ═══════════════════════════════════════════════════════════
--- BEHAVIORS
+-- HELPERS
 -- ═══════════════════════════════════════════════════════════
 
 local function findNearestPlayer(position: Vector3): Model?
@@ -180,43 +193,6 @@ local function findNearestPlayer(position: Vector3): Model?
 	end
 
 	return nearest
-end
-
-local function startChaseBehavior(entry: NPCEntry): ()
-	local config = GameConfig.NPC.CHASE
-
-	entry.behaviorThread = task.spawn(function()
-		while entry.model and entry.model:IsDescendantOf(game) do
-			local rootPart = entry.model.PrimaryPart
-			if not rootPart then
-				break
-			end
-
-			local target = findNearestPlayer(rootPart.Position)
-
-			if target then
-				local targetRoot = target:FindFirstChild("HumanoidRootPart")
-				if targetRoot then
-					local distance = ((targetRoot :: BasePart).Position - rootPart.Position).Magnitude
-					if distance <= config.DETECTION_RADIUS then
-						entry.pathfinder:followTarget(target, {
-							recomputeInterval = config.RECOMPUTE_INTERVAL,
-							arrivalDistance = config.ARRIVAL_DISTANCE,
-							onTargetLost = function()
-								log:debug("Chase NPC: target lost")
-							end,
-						})
-						-- followTarget is non-blocking; wait then re-evaluate for target switching
-						task.wait(config.REEVALUATE_INTERVAL)
-						continue
-					end
-				end
-			end
-
-			-- No target in range, idle
-			task.wait(1)
-		end
-	end)
 end
 
 local function createWaypointMarkers(waypoints: { Vector3 }): Folder
@@ -281,51 +257,183 @@ local function createWaypointMarkers(waypoints: { Vector3 }): Folder
 	return folder
 end
 
-local function startPatrolBehavior(entry: NPCEntry): ()
-	local config = GameConfig.NPC.PATROL
-
-	-- Show waypoint markers in debug mode
-	if GameConfig.GAME.DEBUG then
-		createWaypointMarkers(config.WAYPOINTS)
-	end
-
-	entry.pathfinder:patrol(config.WAYPOINTS, {
-		loopMode = config.LOOP_MODE,
-		waitTime = config.WAIT_TIME,
-		onWaypoint = function(index: number)
-			log:debug(`Patrol NPC: reached waypoint {index}`)
-		end,
-	})
-
-	log:info("Patrol behavior started")
-end
-
 local function getRandomPointInRadius(center: Vector3, radius: number): Vector3
 	local angle = math.random() * math.pi * 2
 	local dist = math.random() * radius
 	return Vector3.new(center.X + math.cos(angle) * dist, center.Y, center.Z + math.sin(angle) * dist)
 end
 
-local function startWanderBehavior(entry: NPCEntry): ()
-	local config = GameConfig.NPC.WANDER
+-- ═══════════════════════════════════════════════════════════
+-- STATE DEFINITIONS
+--
+-- Each NPC type has a state map: { [stateName] = { onEnter, onUpdate, onExit } }
+-- onUpdate returns a state name to transition, or nil to stay in the current state.
+-- The "context" passed to each hook is the NPCEntry table for that NPC.
+-- ═══════════════════════════════════════════════════════════
 
-	entry.behaviorThread = task.spawn(function()
-		while entry.model and entry.model:IsDescendantOf(game) do
-			local target = getRandomPointInRadius(config.CENTER, config.RADIUS)
+-- Chase NPC: Idle (scanning for players) → Chasing (following target)
+local CHASE_STATES: NPCStateMachine.StateMap = {
+	Idle = {
+		onEnter = function(ctx: NPCEntry)
+			ctx.pathfinder:stop()
+		end,
 
-			-- moveTo is blocking — returns when NPC arrives or fails
-			local reached = entry.pathfinder:moveTo(target)
-
-			if reached then
-				log:debug("Wander NPC: reached point, pausing")
+		onUpdate = function(ctx: NPCEntry, _dt: number): string?
+			local rootPart = ctx.model.PrimaryPart
+			if not rootPart then
+				return nil
 			end
 
-			-- Random pause between moves
-			local pause = config.PAUSE_MIN + math.random() * (config.PAUSE_MAX - config.PAUSE_MIN)
-			task.wait(pause)
-		end
-	end)
-end
+			local target = findNearestPlayer(rootPart.Position)
+			if not target then
+				return nil
+			end
+
+			local targetRoot = target:FindFirstChild("HumanoidRootPart")
+			if not targetRoot then
+				return nil
+			end
+
+			local distance = ((targetRoot :: BasePart).Position - rootPart.Position).Magnitude
+			if distance <= GameConfig.NPC.CHASE.DETECTION_RADIUS then
+				-- Stash target so Chasing.onEnter can use it
+				ctx.chaseTarget = target
+				return "Chasing"
+			end
+
+			return nil
+		end,
+	},
+
+	Chasing = {
+		onEnter = function(ctx: NPCEntry)
+			local target = ctx.chaseTarget
+			if not target then
+				return
+			end
+
+			local config = GameConfig.NPC.CHASE
+			ctx.pathfinder:followTarget(target, {
+				recomputeInterval = config.RECOMPUTE_INTERVAL,
+				arrivalDistance = config.ARRIVAL_DISTANCE,
+				onTargetLost = function()
+					log:debug("Chase NPC: target lost (callback)")
+				end,
+			})
+		end,
+
+		onUpdate = function(ctx: NPCEntry, dt: number): string?
+			local rootPart = ctx.model.PrimaryPart
+			if not rootPart then
+				return nil
+			end
+
+			-- Throttle re-evaluation (no need to check every frame)
+			ctx.chaseReevalTimer = (ctx.chaseReevalTimer or 0) + dt
+			if ctx.chaseReevalTimer < GameConfig.NPC.CHASE.REEVALUATE_INTERVAL then
+				return nil
+			end
+			ctx.chaseReevalTimer = 0
+
+			-- Is current target still valid and in range?
+			local currentTarget = ctx.chaseTarget
+			local currentTargetValid = false
+
+			if currentTarget and currentTarget:IsDescendantOf(game) then
+				local targetRoot = currentTarget:FindFirstChild("HumanoidRootPart")
+				if targetRoot then
+					local distance = ((targetRoot :: BasePart).Position - rootPart.Position).Magnitude
+					if distance <= GameConfig.NPC.CHASE.DETECTION_RADIUS then
+						currentTargetValid = true
+					end
+				end
+			end
+
+			if not currentTargetValid then
+				ctx.chaseTarget = nil
+				return "Idle"
+			end
+
+			-- Check if a closer player is now the better target
+			local nearest = findNearestPlayer(rootPart.Position)
+			if nearest and nearest ~= currentTarget then
+				local nearestRoot = nearest:FindFirstChild("HumanoidRootPart")
+				if nearestRoot then
+					local dist = ((nearestRoot :: BasePart).Position - rootPart.Position).Magnitude
+					if dist <= GameConfig.NPC.CHASE.DETECTION_RADIUS then
+						-- Self-transition: onExit stops old follow, onEnter starts new follow
+						ctx.chaseTarget = nearest
+						return "Chasing"
+					end
+				end
+			end
+
+			return nil
+		end,
+
+		onExit = function(ctx: NPCEntry)
+			ctx.pathfinder:stop()
+			ctx.chaseReevalTimer = nil
+		end,
+	},
+}
+
+-- Patrol NPC: single state (extensible — add Alert/Chase states later)
+local PATROL_STATES: NPCStateMachine.StateMap = {
+	Patrolling = {
+		onEnter = function(ctx: NPCEntry)
+			local config = GameConfig.NPC.PATROL
+
+			if GameConfig.GAME.DEBUG and not ctx.debugFolder then
+				ctx.debugFolder = createWaypointMarkers(config.WAYPOINTS)
+			end
+
+			ctx.pathfinder:patrol(config.WAYPOINTS, {
+				loopMode = config.LOOP_MODE,
+				waitTime = config.WAIT_TIME,
+				onWaypoint = function(index: number)
+					log:debug(`Patrol NPC: reached waypoint {index}`)
+				end,
+			})
+			log:info("Patrol behavior started")
+		end,
+
+		onExit = function(ctx: NPCEntry)
+			ctx.pathfinder:stop()
+		end,
+	},
+}
+
+-- Wander NPC: single state (extensible — add Flee/Curious states later)
+local WANDER_STATES: NPCStateMachine.StateMap = {
+	Wandering = {
+		onEnter = function(ctx: NPCEntry)
+			local config = GameConfig.NPC.WANDER
+
+			ctx.wanderThread = task.spawn(function()
+				while ctx.model and ctx.model:IsDescendantOf(game) do
+					local target = getRandomPointInRadius(config.CENTER, config.RADIUS)
+					local reached = ctx.pathfinder:moveTo(target)
+
+					if reached then
+						log:debug("Wander NPC: reached point, pausing")
+					end
+
+					local pause = config.PAUSE_MIN + math.random() * (config.PAUSE_MAX - config.PAUSE_MIN)
+					task.wait(pause)
+				end
+			end)
+		end,
+
+		onExit = function(ctx: NPCEntry)
+			if ctx.wanderThread then
+				task.cancel(ctx.wanderThread)
+				ctx.wanderThread = nil
+			end
+			ctx.pathfinder:stop()
+		end,
+	},
+}
 
 -- ═══════════════════════════════════════════════════════════
 -- PUBLIC API
@@ -341,48 +449,52 @@ function NPCManager.initialize(): ()
 	local wanderEntry = spawnNPC("wander", GameConfig.NPC.WANDER.DISPLAY_NAME, positions.WANDER)
 	local chaseEntry = spawnNPC("chase", GameConfig.NPC.CHASE.DISPLAY_NAME, positions.CHASE)
 
-	-- Start non-player-dependent behaviors immediately
+	-- Attach state machines — each starts in its initial state (onEnter fires immediately)
 	if patrolEntry then
-		startPatrolBehavior(patrolEntry)
+		patrolEntry.stateMachine = NPCStateMachine.new("Patrolling", PATROL_STATES, patrolEntry)
 	end
 
 	if wanderEntry then
-		startWanderBehavior(wanderEntry)
+		wanderEntry.stateMachine = NPCStateMachine.new("Wandering", WANDER_STATES, wanderEntry)
 	end
 
-	-- Chase behavior needs a player target
 	if chaseEntry then
-		local chaseStarted = false
-
-		local function tryStartChase(): ()
-			if chaseStarted then
-				return
-			end
-			if #Players:GetPlayers() > 0 then
-				chaseStarted = true
-				startChaseBehavior(chaseEntry)
-				log:info("Chase behavior activated (player detected)")
-			end
-		end
-
-		Players.PlayerAdded:Connect(function()
-			tryStartChase()
-		end)
-
-		-- Handle players already in-game (Studio testing)
-		tryStartChase()
+		-- Chase starts Idle — transitions to Chasing when a player enters detection radius
+		chaseEntry.stateMachine = NPCStateMachine.new("Idle", CHASE_STATES, chaseEntry)
 	end
 
-	local playerStatus = if #Players:GetPlayers() > 0 then "chase active" else "chase waiting for player"
-	log:info(`NPC system ready — {playerStatus}`)
+	-- Single tick loop for all state machines
+	table.insert(
+		moduleConnections,
+		RunService.PostSimulation:Connect(function(dt: number)
+			for _, entry in activeNPCs do
+				if entry.stateMachine then
+					entry.stateMachine:update(dt)
+				end
+			end
+		end)
+	)
+
+	log:info("NPC system ready")
 end
 
 function NPCManager.cleanup(): ()
+	-- Disconnect module-level connections (includes PostSimulation tick)
+	for _, connection in moduleConnections do
+		connection:Disconnect()
+	end
+	table.clear(moduleConnections)
+
 	for name, entry in activeNPCs do
-		if entry.behaviorThread then
-			task.cancel(entry.behaviorThread)
+		-- Destroy state machine first (onExit stops threads and pathfinder movement)
+		if entry.stateMachine then
+			entry.stateMachine:destroy()
 		end
+		-- Then destroy the pathfinder (disconnects Path.Blocked, Humanoid.Died, etc.)
 		entry.pathfinder:destroy()
+		if entry.debugFolder then
+			entry.debugFolder:Destroy()
+		end
 		if entry.model then
 			entry.model:Destroy()
 		end
