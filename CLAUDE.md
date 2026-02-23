@@ -114,7 +114,9 @@ stylua --check src/
 
 ## Conventions
 
-- See `.claude/rules/` for Luau style guide
+- Luau style guide: `docs/luau-conventions.md` — read before writing Luau code
+- Luau implementation patterns: `docs/luau-patterns.md` — read when implementing common systems
+- Lessons learned: `docs/lessons-learned.md` — read at session start, update via `/session:postmortem`
 - Use `Logger` module instead of raw `print()`
 - All remote events go through `Remotes` module
 
