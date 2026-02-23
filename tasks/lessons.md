@@ -40,3 +40,9 @@
 - **[Roblox]** Don't leave `SpawnLocation.CanCollide = true` when NPCs path through the spawn area. SpawnLocation is a physical part that blocks movement. Spawning behavior uses the `Enabled` property, not `CanCollide` — safe to disable collision.
 
 - **[MCP]** Don't ask users to paste console output. Use `LogService:GetLogHistory()` via MCP `run_code` to read server logs from edit mode, even after play mode ends. Faster and more complete than screenshots.
+
+## Session: 2026-02-22 — GC Audit & State Machine
+
+- **[Architecture]** Don't add new behavior systems on top of leaky infrastructure. Audit GC/cleanup first — the audit found 2 critical leaks (untracked `PlayerAdded` connection, untracked waypoint marker folder) that would have compounded with the state machine refactor.
+
+- **[Architecture]** Don't manage NPC behavior transitions with boolean flags and `PlayerAdded` connections. Use a state machine — the Idle state's `onUpdate` naturally handles "waiting for player" without special-case logic, and `getCurrentState()` makes behavior queryable for debug UI.

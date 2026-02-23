@@ -59,13 +59,17 @@ NPC pathfinding demo showcasing chase, patrol, and wander behaviors using Pathfi
 - `Remotes` — Client-server communication helpers
 - `Logger` — Debug logging with [Server]/[Client] prefixes
 - `NPCPathfinder` — PathfindingService wrapper with moveTo, patrol, followTarget, wander
-- `NPCManager` — Spawns NPCs, assigns behaviors (chase/patrol/wander), manages lifecycle
+- `NPCStateMachine` — Generic finite state machine (shared, reusable for any system)
+- `NPCManager` — Spawns NPCs, wires state machines to pathfinder, manages lifecycle
 
 ### NPC Pathfinding System
 - 3 demo NPCs: Chase (follows nearest player), Patrol (loops waypoints), Wander (random points in radius)
+- Behavior driven by state machines: Chase (Idle ↔ Chasing), Patrol (Patrolling), Wander (Wandering)
+- Single PostSimulation tick drives all state machines; states call NPCPathfinder methods
 - R15 rigs created at runtime via `Players:CreateHumanoidModelFromDescription()`
 - Server-authoritative: `SetNetworkOwner(nil)` on all NPC parts
 - Collision group "NPCs" prevents NPC-to-NPC physics jitter
+- `game:BindToClose` ensures cleanup on server shutdown
 
 ## Development Workflow
 

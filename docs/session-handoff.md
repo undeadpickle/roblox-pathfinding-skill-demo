@@ -1,26 +1,29 @@
 # Session Handoff
 
-> Updated: 2026-02-22 (Session 3)
-> Focus: NPC playtest, bug fixes, debug tooling
+> Updated: 2026-02-22 (Session 4)
+> Focus: GC audit, cleanup fixes, state machine architecture
 
 ---
 
 ## What Got Done
 
-- **All 3 NPC behaviors playtested and verified working**: Chase, Patrol, and Wander all confirmed functional in Studio via MCP log analysis
-- **Chase NPC frozen at spawn fix**: `_computePath` started waypoint traversal at index 1 (NPC's current position). The Y mismatch between navmesh height and HumanoidRootPart hip height caused `_traverseWaypointsNonBlocking`'s 3D distance polling to never resolve. Fixed by starting from index 2.
-- **SpawnLocation collision fix**: 12x12x1 SpawnLocation with `CanCollide = true` physically blocked NPC movement. Set `CanCollide = false` via MCP (saved in place file).
-- **Patrol waypoint visualization**: Yellow neon markers with numbered labels and connecting lines, gated behind `GameConfig.GAME.DEBUG`. Created in `NPCManager.createWaypointMarkers()`.
-- **PathfindingUseImprovedSearch cleanup**: Removed failed script attempt to set it. Property is manual-only in Studio (already enabled and saved in place file).
-- **Debug logging cycle**: Added targeted debug logs to chase system, used MCP `LogService:GetLogHistory()` to diagnose remotely, then removed all debug artifacts before committing.
-- **Post-mortem completed**: 4 new lessons added to `tasks/lessons.md`, PathfindingService gotchas added to CLAUDE.md.
+- **GC/cleanup audit**: Subagent-driven audit found 2 critical leaks (untracked `PlayerAdded` connection, untracked waypoint marker folder) and 5 warnings. All critical and warning issues fixed.
+- **BindToClose hook**: `NPCManager.cleanup()` is now called on server shutdown via `game:BindToClose`.
+- **IsDescendantOf safety**: `followTarget` loop now checks model existence after `task.wait` yield.
+- **Defensive thread cancellation**: `startChaseBehavior` and `startWanderBehavior` cancel existing threads before spawning new ones.
+- **NPCStateMachine module**: New generic FSM class in `src/shared/NPCStateMachine.luau`. States have `onEnter`/`onUpdate`/`onExit` hooks, ticked externally via `PostSimulation`.
+- **NPCManager refactored to state machines**: Replaced `startChaseBehavior`/`startPatrolBehavior`/`startWanderBehavior` with state definitions. Chase uses Idle ↔ Chasing, Patrol uses Patrolling, Wander uses Wandering.
+- **Chase no longer needs PlayerAdded connection**: Idle state's `onUpdate` scans for players automatically. Eliminated the `chaseStarted` flag and deferred-start logic.
+- **Pathfinding research**: Surveyed Roblox community patterns (SimplePath, state machines, ECS) and general game AI (behavior trees, utility AI, steering behaviors, HTN). Informed the state machine decision.
+- **All behaviors verified in Studio**: MCP log analysis confirmed Patrol cycling waypoints, Wander hitting random points, Chase transitioning Idle → Chasing on player detection.
+- **Post-mortem completed**: 2 new lessons added to `tasks/lessons.md`, CLAUDE.md updated with state machine architecture.
 
 ## What's Next
 
-1. **Polish NPC behaviors**: Tune speeds, distances, patrol waypoints. Consider adding health bars or state indicator BillboardGuis above NPCs.
-2. **Phase 1 roadmap**: Basic UI showing NPC states (chasing/patrolling/wandering/idle), one complete player flow (join > see NPCs > interact).
-3. **Add obstacles**: Current map is flat baseplate. Add walls/obstacles to test pathfinding around geometry.
-4. **Wander radius visualization**: Similar to patrol markers — show the wander boundary circle in debug mode.
+1. **Phase 1 UI**: Show NPC states (Idle/Chasing/Patrolling/Wandering) via BillboardGuis above NPCs. `stateMachine:getCurrentState()` is already exposed for this. Relevant files: `src/server/modules/NPCManager.luau`
+2. **Add obstacles**: Current map is flat baseplate. Add walls/obstacles to test pathfinding around geometry.
+3. **Wander radius visualization**: Debug circle showing wander boundary, similar to patrol waypoint markers. Gate behind `GameConfig.GAME.DEBUG`.
+4. **Polish NPC behaviors**: Tune speeds, detection distances, patrol waypoints. Consider health bars.
 
 ## Blockers
 
@@ -32,30 +35,31 @@
 
 ### What Worked
 
-- **MCP LogService diagnostics**: Used `LogService:GetLogHistory()` via `run_code` to read server Output from edit mode. Diagnosed chase freeze without user needing to paste logs. Reusable pattern for all runtime debugging.
-- **Incremental debug logging**: Two rounds of targeted logs narrowed "NPC doesn't move" to "stuck on waypoint 1, Y mismatch" within minutes.
-- **MCP pre-flight checks**: Verified Rojo sync, module source, baseplate geometry, and SpawnLocation properties from edit mode before asking for manual playtests. Reduced round-trips.
+- **Subagent-driven GC audit**: Launching an Explore agent with specific audit criteria (connection leaks, instance leaks, thread leaks, table leaks, per-frame costs) produced a thorough report with line numbers. Systematic and faster than manual review.
+- **Research-then-decide pattern**: 3 parallel Explore agents (current code, Roblox community, general game AI) gave a comprehensive landscape before committing to state machines. Informed decision, not a guess.
+- **MCP playtest verification**: `LogService:GetLogHistory()` confirmed state machine transitions without manual testing reports.
+- **Atomic commits**: GC fixes and state machine in separate commits. Clean history.
 
 ### What Broke
 
-- **Chase NPC frozen at spawn**: `GetWaypoints()` returns start position as waypoint 1. `_traverseWaypointsNonBlocking` used 3D distance (3.19 studs due to hip height) which exceeded `WaypointReachDistance` (3.0). NPC timed out on waypoint 1 every cycle. Fixed by starting from index 2 in `_computePath`.
-- **SpawnLocation blocking chase path**: Default `CanCollide = true` on SpawnLocation created a physical wall NPC couldn't walk over. Fixed by disabling collision (spawning uses `Enabled`, not `CanCollide`).
+- Nothing broke this session. GC fixes and state machine refactor both worked on first playtest.
 
 ### Wrong Assumptions
 
-- **Waypoint 1 would be a useful traversal target** — It's always the NPC's current XZ position at navmesh height. Standard Roblox practice is to skip it. The blocking `_traverseWaypoints` (patrol/wander) didn't expose this because `MoveToFinished:Wait()` ignores Y axis.
-- **SpawnLocation is non-physical** — It's a standard Part with `CanCollide = true` by default. Anything that walks through the spawn area needs collision disabled.
+- None this session. The GC audit caught issues before they became problems, and the state machine was a straightforward refactor of existing implicit states.
 
 ---
 
-## Quirks Discovered
+## Key Architecture Notes for Next Session
 
-- `LogService:GetLogHistory()` works from edit-mode MCP `run_code` and includes server logs from the most recent play session — powerful diagnostic shortcut.
-- `MoveToFinished:Wait()` resolves based on XZ distance only. Manual `Vector3.Magnitude` checks include Y. These give different results for waypoints at different heights.
-- `GetWaypoints()` waypoint 1 is always at navmesh height (Y=0), while `HumanoidRootPart` sits at hip height (Y~3.19 for R15). The 3D distance between them (~3.19 studs) can exceed `WaypointReachDistance` (3.0).
+- **State machine module** is in `src/shared/` (not `src/server/`) — it's generic and reusable for client systems too.
+- **State hooks receive the NPCEntry as `context`** — chase state stores `chaseTarget` and `chaseReevalTimer` directly on the entry table.
+- **Self-transitions are allowed** — `Chasing → Chasing` triggers exit/enter cycle for target switching. This is intentional.
+- **Patrol and Wander are single-state machines** — extensibility point for future Alert, Flee, Curious states.
+- **One PostSimulation connection ticks all machines** — stored in `moduleConnections`, disconnected in cleanup.
 
 ---
 
 ## CLAUDE.md Suggestions
 
-None — CLAUDE.md was updated this session with PathfindingService gotchas section.
+None — CLAUDE.md was updated this session with NPCStateMachine in Key Modules and state machine architecture in NPC Pathfinding System.
