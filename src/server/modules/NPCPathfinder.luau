@@ -386,13 +386,11 @@ function NPCPathfinder:_setupCollisionGroup(groupName: string)
 end
 
 function NPCPathfinder:_disableUnusedStates()
+	-- Keep FallingDown, GettingUp, Freefall, Landed enabled — NPCs need the
+	-- physics recovery cycle when colliding with obstacle geometry.
 	local unusedStates = {
 		Enum.HumanoidStateType.Climbing,
-		Enum.HumanoidStateType.FallingDown,
 		Enum.HumanoidStateType.Flying,
-		Enum.HumanoidStateType.Freefall,
-		Enum.HumanoidStateType.GettingUp,
-		Enum.HumanoidStateType.Landed,
 		Enum.HumanoidStateType.Ragdoll,
 		Enum.HumanoidStateType.Seated,
 		Enum.HumanoidStateType.StrafingNoPhysics,

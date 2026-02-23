@@ -257,10 +257,41 @@ local function createWaypointMarkers(waypoints: { Vector3 }): Folder
 	return folder
 end
 
+local cachedObstacleFolder: Folder? = nil
+
+local function getObstacleFolder(): Folder?
+	if not cachedObstacleFolder then
+		cachedObstacleFolder = Workspace:FindFirstChild("Obstacles") :: Folder?
+	end
+	return cachedObstacleFolder
+end
+
 local function getRandomPointInRadius(center: Vector3, radius: number): Vector3
-	local angle = math.random() * math.pi * 2
-	local dist = math.random() * radius
-	return Vector3.new(center.X + math.cos(angle) * dist, center.Y, center.Z + math.sin(angle) * dist)
+	local MAX_ATTEMPTS = 10
+	local obstacleFolder = getObstacleFolder()
+
+	for _ = 1, MAX_ATTEMPTS do
+		local angle = math.random() * math.pi * 2
+		local dist = math.random() * radius
+		local candidate = Vector3.new(center.X + math.cos(angle) * dist, center.Y, center.Z + math.sin(angle) * dist)
+
+		-- Raycast down from above to check for obstacle geometry at this XZ
+		local rayOrigin = Vector3.new(candidate.X, candidate.Y + 20, candidate.Z)
+		local rayResult = Workspace:Raycast(rayOrigin, Vector3.new(0, -40, 0))
+
+		if rayResult then
+			local hitPart = rayResult.Instance
+			-- Accept only if we hit the baseplate (ground), not an obstacle
+			if not obstacleFolder or not hitPart:IsDescendantOf(obstacleFolder) then
+				return Vector3.new(candidate.X, rayResult.Position.Y + 3, candidate.Z)
+			end
+		else
+			return candidate
+		end
+	end
+
+	-- Fallback: return center if all attempts hit obstacles
+	return center
 end
 
 -- ═══════════════════════════════════════════════════════════
@@ -459,6 +490,10 @@ function NPCManager.initialize(): ()
 	end
 
 	if chaseEntry then
+		local humanoid = chaseEntry.model:FindFirstChildOfClass("Humanoid")
+		if humanoid then
+			humanoid.WalkSpeed = GameConfig.NPC.CHASE.WALK_SPEED
+		end
 		-- Chase starts Idle — transitions to Chasing when a player enters detection radius
 		chaseEntry.stateMachine = NPCStateMachine.new("Idle", CHASE_STATES, chaseEntry)
 	end
@@ -501,6 +536,7 @@ function NPCManager.cleanup(): ()
 		log:debug(`Cleaned up {name}`)
 	end
 	table.clear(activeNPCs)
+	cachedObstacleFolder = nil
 	log:info("All NPCs cleaned up")
 end
 

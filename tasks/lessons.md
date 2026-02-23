@@ -46,3 +46,13 @@
 - **[Architecture]** Don't add new behavior systems on top of leaky infrastructure. Audit GC/cleanup first — the audit found 2 critical leaks (untracked `PlayerAdded` connection, untracked waypoint marker folder) that would have compounded with the state machine refactor.
 
 - **[Architecture]** Don't manage NPC behavior transitions with boolean flags and `PlayerAdded` connections. Use a state machine — the Idle state's `onUpdate` naturally handles "waiting for player" without special-case logic, and `getCurrentState()` makes behavior queryable for debug UI.
+
+## Session: 2026-02-22 — Obstacle System
+
+- **[Luau]** Don't call Logger methods with dot syntax (`Logger.info()`). Logger uses instances — always `Logger.new("ModuleName")` then `log:info()`. The colon vs dot distinction causes a runtime error, not a type error.
+
+- **[Architecture]** Don't wrap multiple module initializations in a single `pcall` without checking intermediate results. In `init.server.luau`, a `MapSetup` error silently prevented `NPCManager` from loading. If modules must share one `pcall`, log each module's init separately so failures are visible.
+
+- **[Roblox]** Don't disable `FallingDown`/`GettingUp`/`Freefall`/`Landed` humanoid states when the NPC operates around physical obstacles. These states form the physics recovery cycle — without them, a knocked-over NPC stays down permanently. Only disable on flat geometry with no collision risk.
+
+- **[Architecture]** Don't generate random NPC movement targets without validating against obstacle geometry. Use `Workspace:Raycast` downward to confirm the point is on walkable ground, not inside/on top of an obstacle. Also use the raycast hit position for accurate Y-snapping.

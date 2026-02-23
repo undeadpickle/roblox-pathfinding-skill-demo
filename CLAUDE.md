@@ -55,9 +55,10 @@ NPC pathfinding demo showcasing chase, patrol, and wander behaviors using Pathfi
 - `Packages/` — Wally dependencies (auto-generated, don't edit)
 
 ### Key Modules
-- `GameConfig` — Central configuration values (includes NPC config)
+- `GameConfig` — Central configuration values (NPC config, map obstacles)
 - `Remotes` — Client-server communication helpers
 - `Logger` — Debug logging with [Server]/[Client] prefixes
+- `MapSetup` — Config-driven obstacle geometry spawner (reads `GameConfig.MAP.OBSTACLES`)
 - `NPCPathfinder` — PathfindingService wrapper with moveTo, patrol, followTarget, wander
 - `NPCStateMachine` — Generic finite state machine (shared, reusable for any system)
 - `NPCManager` — Spawns NPCs, wires state machines to pathfinder, manages lifecycle
@@ -70,6 +71,14 @@ NPC pathfinding demo showcasing chase, patrol, and wander behaviors using Pathfi
 - Server-authoritative: `SetNetworkOwner(nil)` on all NPC parts
 - Collision group "NPCs" prevents NPC-to-NPC physics jitter
 - `game:BindToClose` ensures cleanup on server shutdown
+
+### Map & Obstacles
+- Obstacle geometry defined in `GameConfig.MAP.OBSTACLES` (position, size, color per obstacle)
+- `MapSetup.initialize()` creates anchored `CanCollide = true` Parts in a `Workspace.Obstacles` folder
+- PathfindingService auto-carves obstacles from navmesh — no pathfinder code changes needed
+- MapSetup runs before NPCManager so navmesh includes obstacles on first path computation
+- Wander target generation uses `Workspace:Raycast` to reject points inside obstacle footprints
+- Chase NPC has configurable `WALK_SPEED` (default 24, vs player default 16)
 
 ## Development Workflow
 
@@ -127,3 +136,7 @@ Format: `- [Category] Brief description of what doesn't work and what to do inst
 - **[Pathfinding] GetWaypoints() waypoint 1 is start position** — Always skip index 1 and start traversal from index 2. Waypoint 1 has the same XZ as the NPC but at navmesh height (Y=0), causing 3D distance checks to fail (hip height Y mismatch). `MoveToFinished:Wait()` doesn't have this problem (it ignores Y).
 - **[Pathfinding] SpawnLocation blocks NPC movement** — Default `CanCollide = true` makes it a physical wall. Set `CanCollide = false`; spawning uses `Enabled`, not collision.
 - **[Pathfinding] PathfindingUseImprovedSearch** — Not scriptable. Must be set manually in Studio: Workspace > Properties > Enabled.
+
+### Humanoid & Physics Gotchas
+
+- **[Humanoid] State disabling is environment-dependent** — `_disableUnusedStates` disables physics recovery states (`FallingDown`, `GettingUp`, `Freefall`, `Landed`). Safe on flat baseplates, but causes permanently stuck NPCs when obstacles can knock them over. Keep recovery states enabled when physical geometry exists.
