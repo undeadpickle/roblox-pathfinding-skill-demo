@@ -71,7 +71,8 @@ NPC pathfinding demo showcasing chase, patrol, and wander behaviors using Pathfi
 - Server-authoritative: `SetNetworkOwner(nil)` on all NPC parts
 - Collision group "NPCs" prevents NPC-to-NPC physics jitter
 - `game:BindToClose` ensures cleanup on server shutdown
-- Debug state labels (BillboardGui) above NPC heads show current state with color coding, gated by `GameConfig.GAME.DEBUG`
+- Chase `followTarget` uses continuous-motion loop (0.1s tick) with event-driven waypoint advancement (`MoveToFinished`), timer-based path recomputation, stuck detection + auto-jump recovery
+- Debug visuals gated by `GameConfig.GAME.DEBUG`: state labels above heads, detection radius disc (chase), waypoint spheres (chase path, color-coded), patrol waypoint markers
 
 ### Map & Obstacles
 - Obstacle geometry defined in `GameConfig.MAP.OBSTACLES` (position, size, color per obstacle)

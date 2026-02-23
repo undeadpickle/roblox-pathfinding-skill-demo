@@ -1,30 +1,42 @@
 # Session Handoff
 
-> Updated: 2026-02-23 (Session 7)
-> Focus: Documentation audit — backporting lessons learned into skill, convention, and pattern docs
+> Updated: 2026-02-23 (Session 8)
+> Focus: Chase NPC smooth pursuit — fixed stop-start stutter, added SimplePath-inspired improvements
 
 ---
 
 ## What Got Done
 
-- **SKILL.md bug fix**: Quick start code iterated all waypoints (`for _, waypoint in waypoints do`) — contradicted the lesson that waypoint 1 is the start position. Fixed to `for i = 2, #waypoints do` with explanatory comment.
-- **SKILL.md expanded**: Added 6 new symptoms to Scenario 4 debugging table (rapid recomputation, stuck after knockover, stale MoveToFinished, XZ vs 3D mismatch, SpawnLocation collision, stop() thread kill). Strengthened `PathfindingUseImprovedSearch` with "not scriptable" warning. Updated Wander row with obstacle validation guidance.
-- **common-pitfalls.md expanded**: Added 3 new causes to "NPC moves but gets stuck" (SpawnLocation, humanoid states, waypoint index 1). Added 3 new sections: rapid recomputation, stop() thread kill, MoveToFinished/distance check disagreement.
-- **behavior-patterns.md updated**: Wander `findRandomPoint` now rejects hits on obstacle parts with example code.
-- **luau-conventions.md expanded**: New "Colon vs Dot Method Calls" section. `task.cancel` self-reference gotcha in Task Library section.
-- **luau-patterns.md expanded**: New "Safe Multi-Module Initialization" pattern with bad/good pcall examples.
-- **lessons-learned.md updated**: Added session entry about docs-vs-lessons drift.
+- **Chase followTarget() rewrite**: Replaced sequential compute-traverse-wait loop (50% idle time) with continuous 0.1s tick loop. NPC always has an active MoveTo — no dead time between recompute cycles.
+- **Event-driven waypoint advancement**: Replaced distance polling with `MoveToFinished` listener. Waypoint-to-waypoint transitions are instant instead of up to 0.1s late.
+- **Stuck detection + auto-jump**: `followTarget` now tracks progress via `_lastProgressPosition`/`_lastProgressTime`. If no movement for 2s, NPC jumps and force-recomputes path. Prevents permanent wedging against geometry.
+- **Jump on Path.Blocked**: `_onPathBlocked` now fires `Humanoid.Jump = true` before the deferred recompute — cheap recovery for small dynamic obstacles.
+- **Waypoint visualization**: Color-coded neon spheres (orange=normal, red=jump, green=destination) at each computed waypoint. Recreated on every path recompute, destroyed on stop. Gated by `visualize` option passed from NPCManager.
+- **Detection radius disc**: Red semi-transparent cylinder welded to chase NPC root part showing 50-stud detection radius. Gated by `GameConfig.GAME.DEBUG`.
+- **Removed dead code**: `_traverseWaypointsNonBlocking()` deleted — replaced by the continuous loop + MoveToFinished pattern.
+- **lessons-learned.md updated**: 5 new rules from this session (continuous loop vs compute-wait, MoveToFinished vs polling, arrival MoveTo, jump on blocked, stuck detection in followTarget).
+- **CLAUDE.md updated**: NPC Pathfinding System section now describes the new chase architecture and all debug visuals.
+
+## Files Changed
+
+- `src/server/modules/NPCPathfinder.luau` — followTarget rewrite, _onPathBlocked jump, visual waypoint helpers, _traverseWaypointsNonBlocking removed
+- `src/server/modules/NPCManager.luau` — detection radius disc, visualize option wired to followTarget
+- `docs/lessons-learned.md` — new session entry
+- `CLAUDE.md` — architecture section updated
 
 ## What's Next
 
-1. **Wander radius visualization**: Debug circle showing wander boundary, similar to patrol waypoint markers. Gate behind `GameConfig.GAME.DEBUG`. Relevant files: `src/server/modules/NPCManager.luau`, `src/shared/GameConfig.luau`
-2. **Polish NPC behaviors**: Tune detection distances, patrol waypoints. Consider health bars. Relevant files: `src/shared/GameConfig.luau`, `src/server/modules/NPCManager.luau`
-3. **More obstacle variety**: Ramps, elevated platforms to test `AgentCanJump` waypoints. Relevant files: `src/shared/GameConfig.luau`, `src/server/modules/MapSetup.luau`
-4. **Phase 1 core loop**: Basic UI showing game state, one complete player flow (join > play > result)
+1. **Playtest verification**: Rojo sync + Studio playtest to confirm smooth chase, waypoint visuals, stuck recovery, and no regressions on patrol/wander
+2. **Detection radius disc orientation bug**: The disc was created but user reported not seeing it — may need CFrame debugging (cylinder orientation, ground-level positioning)
+3. **Chase NPC orientation**: NPC doesn't face the player during pursuit — may need CFrame.lookAt or MoveTo direction tuning
+4. **Wander radius visualization**: Debug circle for wander boundary (same pattern as detection disc)
+5. **More obstacle variety**: Ramps, elevated platforms to test AgentCanJump waypoints
+6. **Phase 1 core loop**: Basic UI showing game state, one complete player flow
 
 ## Blockers
 
-- None
+- **Detection radius disc not visible** — reported by user before session was interrupted. Needs investigation (may be Y-positioning, cylinder orientation, or transparency issue).
+- **Chase NPC not facing player** — reported alongside disc issue. The Humanoid steers toward MoveTo target but may not rotate fast enough or may face waypoint direction instead of target direction.
 
 ---
 
@@ -32,27 +44,30 @@
 
 ### What Worked
 
-- **Systematic audit approach**: Reading all four docs (lessons, skill, conventions, patterns) in parallel made contradictions immediately visible — especially the waypoint iteration bug which was actively teaching the wrong pattern.
-- **Lessons-learned as source of truth**: The lessons file captured real debugging sessions with specific symptoms. Backporting these into skill reference docs means future sessions get the fix upfront instead of rediscovering it.
+- **SimplePath source code analysis**: Reading the actual module code (not just the forum post) revealed concrete patterns worth stealing — especially MoveToFinished-driven advancement and stuck detection. The comparison framework (what to steal vs what we do better) kept the scope focused.
+- **Incremental plan → execute flow**: Planning the followTarget rewrite separately from the SimplePath improvements prevented scope creep. Each change was testable independently.
+- **Existing field reuse**: `_lastProgressPosition`/`_lastProgressTime` were already in the constructor from the skill asset — just unused by followTarget. No new fields needed for stuck detection.
 
 ### What Broke
 
-- Nothing. Documentation-only session — no code changes, no build/lint needed.
+- Detection radius disc visualization not confirmed working — user reported not seeing it. Created but possibly wrong CFrame orientation or Y-offset.
+- Chase NPC face orientation issue surfaced but wasn't addressed (session pivoted to SimplePath analysis).
 
 ### Wrong Assumptions
 
-- None this session.
+- Assumed the cylinder CFrame for the detection disc was correct without playtesting. Should have offered to verify via MCP `run_code` before moving on.
 
 ---
 
 ## Key Architecture Notes for Next Session
 
-- **Skill docs now reflect all known pathfinding pitfalls** from sessions 1–6. No known gaps between lessons-learned and reference docs.
-- **luau-conventions.md and luau-patterns.md are general-purpose** — not pathfinding-specific. The additions (colon/dot, task.cancel, multi-init pcall) apply to any Roblox project.
-- **The `.claude/skills/roblox-npc-pathfinding/` directory is untracked in git** — these files exist locally but haven't been committed yet. They'll be included in this session's commit.
+- **followTarget is now a 0.1s continuous loop** with MoveToFinished event for waypoint advancement. The loop handles 3 zones: arrival (MoveTo target), direct chase (LoS, skip pathfinding), and pathfinding (timer-based recompute). Stuck detection runs in the pathfinding zone only.
+- **MoveToFinished connection is local** to the followTarget thread — created before the loop, disconnected on exit. Not stored on self, so no stale connection risk.
+- **Visual waypoints use a clone template** (`waypointTemplate` module-level Part). Cloned per waypoint, destroyed on recompute and stop. Gated by `options.visualize`, not directly by GameConfig (keeps NPCPathfinder decoupled from GameConfig).
+- **Detection radius disc is welded** to the NPC root part via WeldConstraint. Parented to Workspace (not the model) so it doesn't affect the model hierarchy.
 
 ---
 
 ## CLAUDE.md Suggestions
 
-None — CLAUDE.md is accurate. No architectural changes this session.
+None — updated during this session.

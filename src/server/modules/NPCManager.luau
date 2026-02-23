@@ -36,6 +36,7 @@ type NPCEntry = {
 	stateMachine: any,
 	behaviorType: string,
 	debugFolder: Folder?,
+	debugDisc: Part?,
 	stateLabel: TextLabel?,
 	-- Chase state fields (populated by state hooks)
 	chaseTarget: Model?,
@@ -308,6 +309,43 @@ local function createWaypointMarkers(waypoints: { Vector3 }): Folder
 	return folder
 end
 
+local function createDetectionRadiusCircle(model: Model, radius: number): Part?
+	if not GameConfig.GAME.DEBUG then
+		return nil
+	end
+
+	local rootPart = model.PrimaryPart
+	if not rootPart then
+		return nil
+	end
+
+	local diameter = radius * 2
+	local disc = Instance.new("Part")
+	disc.Name = "DetectionRadiusDisc"
+	disc.Shape = Enum.PartType.Cylinder
+	-- Cylinder axis is along X, so X = thickness, Y/Z = diameter
+	disc.Size = Vector3.new(0.2, diameter, diameter)
+	-- Lay flat on ground: position at ground level, rotate 90° around Z so cylinder faces up
+	disc.CFrame = CFrame.new(rootPart.Position.X, 0.15, rootPart.Position.Z) * CFrame.Angles(0, 0, math.rad(90))
+	disc.Anchored = false
+	disc.CanCollide = false
+	disc.CanTouch = false
+	disc.CanQuery = false
+	disc.Material = Enum.Material.Neon
+	disc.Color = Color3.fromRGB(239, 68, 68) -- Red (matches Chasing state color)
+	disc.Transparency = 0.85
+
+	-- Weld to root part so the disc follows the NPC
+	local weld = Instance.new("WeldConstraint")
+	weld.Part0 = rootPart
+	weld.Part1 = disc
+	weld.Parent = disc
+
+	disc.Parent = Workspace
+
+	return disc
+end
+
 local cachedObstacleFolder: Folder? = nil
 
 local function getObstacleFolder(): Folder?
@@ -398,6 +436,7 @@ local CHASE_STATES: NPCStateMachine.StateMap = {
 			ctx.pathfinder:followTarget(target, {
 				recomputeInterval = config.RECOMPUTE_INTERVAL,
 				arrivalDistance = config.ARRIVAL_DISTANCE,
+				visualize = GameConfig.GAME.DEBUG,
 				onTargetLost = function()
 					log:debug("Chase NPC: target lost (callback)")
 				end,
@@ -551,6 +590,7 @@ function NPCManager.initialize(): ()
 		end
 		-- Chase starts Idle — transitions to Chasing when a player enters detection radius
 		chaseEntry.stateLabel = createStateLabel(chaseEntry.model)
+		chaseEntry.debugDisc = createDetectionRadiusCircle(chaseEntry.model, GameConfig.NPC.CHASE.DETECTION_RADIUS)
 		chaseEntry.stateMachine =
 			NPCStateMachine.new("Idle", CHASE_STATES, chaseEntry, makeStateLabelUpdater(chaseEntry.stateLabel))
 	end
@@ -586,6 +626,9 @@ function NPCManager.cleanup(): ()
 		entry.pathfinder:destroy()
 		if entry.debugFolder then
 			entry.debugFolder:Destroy()
+		end
+		if entry.debugDisc then
+			entry.debugDisc:Destroy()
 		end
 		if entry.model then
 			entry.model:Destroy()

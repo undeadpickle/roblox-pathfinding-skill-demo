@@ -60,3 +60,15 @@
 ## Session: 2026-02-23 — Docs Audit vs Lessons Learned
 
 - **[Docs]** Don't assume skill reference docs stay in sync with lessons learned. The SKILL.md quick start code iterated all waypoints (`for _, waypoint in waypoints do`) while lessons explicitly said to skip index 1. Periodically audit skill assets, conventions, and patterns docs against accumulated lessons to catch contradictions.
+
+## Session: 2026-02-23 — Chase NPC Smooth Pursuit & SimplePath Patterns
+
+- **[Pathfinding]** Don't use sequential compute-traverse-wait loops for chase behavior. The pattern `_computePath() → _traverseWaypointsNonBlocking(0.4s) → task.wait(0.5s)` creates ~50% idle time where no MoveTo is active. Use a continuous 0.1s tick loop that always has an active MoveTo and recomputes on a timer without stopping movement.
+
+- **[Pathfinding]** Don't poll waypoint distance for advancement in a chase loop. `Humanoid.MoveToFinished` fires the instant the Humanoid reaches its MoveTo target — zero latency. Distance polling at 0.1s intervals can miss or overshoot waypoints at WalkSpeed 24 (2.4 studs/tick). Use MoveToFinished for waypoint-to-waypoint progression, keep the tick loop for recomputation and zone management.
+
+- **[Pathfinding]** Don't call `MoveTo(self._rootPart.Position)` as an arrival stop. It fires a stale `MoveToFinished(true)` signal and makes the NPC visibly freeze. Use `MoveTo(targetPos)` at arrival distance so the NPC keeps facing and drifting toward the target.
+
+- **[Pathfinding]** Don't rely only on path recomputation when `Path.Blocked` fires. Try `Humanoid.Jump = true` first — it's cheaper and often clears small dynamic obstacles without needing a full `ComputeAsync` cycle.
+
+- **[Roblox]** Don't forget stuck detection in `followTarget`. The `_lastProgressPosition`/`_lastProgressTime` fields existed but were only used by `_traverseWaypoints` (blocking patrol). Chase loops need their own stuck check with a shorter threshold (2s vs 8s) since chase demands responsiveness.

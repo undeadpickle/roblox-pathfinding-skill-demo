@@ -39,6 +39,17 @@ local log = Logger.new("NPCPathfinder")
 local NPCPathfinder = {}
 NPCPathfinder.__index = NPCPathfinder
 
+-- Template part for waypoint visualization (cloned per waypoint)
+local waypointTemplate = Instance.new("Part")
+waypointTemplate.Size = Vector3.new(0.6, 0.6, 0.6)
+waypointTemplate.Shape = Enum.PartType.Ball
+waypointTemplate.Anchored = true
+waypointTemplate.CanCollide = false
+waypointTemplate.CanTouch = false
+waypointTemplate.CanQuery = false
+waypointTemplate.Material = Enum.Material.Neon
+waypointTemplate.Transparency = 0.3
+
 -- Default configuration
 local DEFAULTS = {
 	AgentRadius = 2,
@@ -103,6 +114,8 @@ function NPCPathfinder.new(npcModel: Model, config: { [string]: any }?)
 	self._lastComputeTime = 0
 	self._lastProgressPosition = self._rootPart.Position
 	self._lastProgressTime = tick()
+	self._lastArrivalTime = nil :: number?
+	self._visualWaypoints = {} :: { Part }
 
 	-- Connections (tracked for cleanup)
 	self._connections = {}
@@ -175,11 +188,45 @@ function NPCPathfinder:followTarget(target: Model, options: { [string]: any }?)
 	local arrivalDistance = options.arrivalDistance or 5
 	local onArrival = options.onArrival
 	local onTargetLost = options.onTargetLost
+	local visualize = options.visualize or false
+	local tickRate = 0.1
+	local stuckCheckInterval = 2.0
 
 	self:stop()
 	self._isMoving = true
 
+	-- Event-driven waypoint advancement: MoveToFinished advances the index
+	-- and issues the next MoveTo, so the NPC never pauses between waypoints.
+	local moveConnection = self._humanoid.MoveToFinished:Connect(function(reached)
+		if not self._isMoving or self._isDestroyed then
+			return
+		end
+		-- Only advance during pathfinding (not arrival/direct chase which issue their own MoveTo)
+		if #self._waypoints == 0 or self._currentWaypointIndex < 1 then
+			return
+		end
+		if reached and self._currentWaypointIndex < #self._waypoints then
+			self._currentWaypointIndex += 1
+			local nextWaypoint = self._waypoints[self._currentWaypointIndex]
+			if nextWaypoint.Action == Enum.PathWaypointAction.Jump then
+				self._humanoid.Jump = true
+			end
+			if nextWaypoint.Action == Enum.PathWaypointAction.Custom then
+				self:_handleCustomWaypoint(nextWaypoint)
+			else
+				self._humanoid:MoveTo(nextWaypoint.Position)
+			end
+		end
+	end)
+
 	self._followThread = task.spawn(function()
+		-- Start at recomputeInterval to force immediate first path computation
+		local timeSinceRecompute = recomputeInterval
+
+		-- Stuck detection state
+		self._lastProgressPosition = self._rootPart.Position
+		self._lastProgressTime = tick()
+
 		while self._isMoving and not self._isDestroyed do
 			-- Validate target
 			local targetRoot = target and target:FindFirstChild("HumanoidRootPart") or target and target.PrimaryPart
@@ -190,30 +237,91 @@ function NPCPathfinder:followTarget(target: Model, options: { [string]: any }?)
 				break
 			end
 
-			local distance = (targetRoot.Position - self._rootPart.Position).Magnitude
+			local targetPos = targetRoot.Position
+			local distance = (targetPos - self._rootPart.Position).Magnitude
 
-			-- At arrival distance
+			-- ARRIVAL: keep moving toward target instead of stopping dead
 			if distance <= arrivalDistance then
-				self._humanoid:MoveTo(self._rootPart.Position)
+				self._humanoid:MoveTo(targetPos)
 				if onArrival then
-					onArrival(target)
+					local now = tick()
+					if not self._lastArrivalTime or now - self._lastArrivalTime >= 0.5 then
+						self._lastArrivalTime = now
+						onArrival(target)
+					end
 				end
-				task.wait(0.2)
+				-- Recompute immediately when target moves out of arrival range
+				timeSinceRecompute = recomputeInterval
+				-- Reset stuck tracking (arrival is intentional non-progress)
+				self._lastProgressPosition = self._rootPart.Position
+				self._lastProgressTime = tick()
+				task.wait(tickRate)
 				continue
 			end
 
-			-- Close + line of sight = direct chase
-			if distance <= self._config.DirectMoveDistance and self:_hasLineOfSight(targetRoot.Position) then
-				self._humanoid:MoveTo(targetRoot.Position)
-			else
-				-- Compute and start following path (non-blocking)
-				local pathFound = self:_computePath(targetRoot.Position)
-				if pathFound then
-					self:_traverseWaypointsNonBlocking(recomputeInterval)
+			-- DIRECT CHASE: close + line of sight, skip pathfinding entirely
+			if distance <= self._config.DirectMoveDistance and self:_hasLineOfSight(targetPos) then
+				self._humanoid:MoveTo(targetPos)
+				-- Clear stale waypoints so we recompute fresh when LoS breaks
+				self._waypoints = {}
+				self._currentWaypointIndex = 0
+				timeSinceRecompute = 0
+				-- Reset stuck tracking (direct chase = different movement mode)
+				self._lastProgressPosition = self._rootPart.Position
+				self._lastProgressTime = tick()
+				task.wait(tickRate)
+				continue
+			end
+
+			-- PATHFINDING: recompute on timer, event-driven waypoint advancement
+			timeSinceRecompute += tickRate
+			if timeSinceRecompute >= recomputeInterval then
+				timeSinceRecompute = 0
+				local pathFound = self:_computePath(targetPos)
+				if pathFound and visualize then
+					self:_createVisualWaypoints()
 				end
 			end
 
-			task.wait(recomputeInterval)
+			-- Issue MoveTo for current waypoint (MoveToFinished handles advancement)
+			if
+				#self._waypoints > 0
+				and self._currentWaypointIndex >= 1
+				and self._currentWaypointIndex <= #self._waypoints
+			then
+				local waypoint = self._waypoints[self._currentWaypointIndex]
+
+				if waypoint.Action == Enum.PathWaypointAction.Jump then
+					self._humanoid.Jump = true
+				end
+
+				if waypoint.Action == Enum.PathWaypointAction.Custom then
+					self:_handleCustomWaypoint(waypoint)
+				else
+					self._humanoid:MoveTo(waypoint.Position)
+				end
+			else
+				-- No waypoints (path failed or pending) — best-effort direct move
+				self._humanoid:MoveTo(targetPos)
+			end
+
+			-- Stuck detection: if no progress for stuckCheckInterval, jump + recompute
+			local moved = (self._rootPart.Position - self._lastProgressPosition).Magnitude
+			if moved >= self._config.StuckDistanceThreshold then
+				self._lastProgressPosition = self._rootPart.Position
+				self._lastProgressTime = tick()
+			elseif tick() - self._lastProgressTime > stuckCheckInterval then
+				log:debug("Chase NPC stuck — jumping and recomputing path")
+				self._humanoid.Jump = true
+				self:_computePath(targetPos)
+				if visualize then
+					self:_createVisualWaypoints()
+				end
+				self._lastProgressPosition = self._rootPart.Position
+				self._lastProgressTime = tick()
+			end
+
+			task.wait(tickRate)
 
 			-- Model may have been destroyed during the wait
 			if not self._rootPart or not self._model or not self._model:IsDescendantOf(game) then
@@ -221,6 +329,11 @@ function NPCPathfinder:followTarget(target: Model, options: { [string]: any }?)
 			end
 		end
 
+		-- Cleanup: disconnect event, destroy visuals
+		if moveConnection then
+			moveConnection:Disconnect()
+		end
+		self:_destroyVisualWaypoints()
 		self._isMoving = false
 	end)
 end
@@ -287,6 +400,8 @@ function NPCPathfinder:stop()
 	self._isMoving = false
 	self._waypoints = {}
 	self._currentWaypointIndex = 0
+	self._lastArrivalTime = nil
+	self:_destroyVisualWaypoints()
 
 	-- Cancel follow/patrol threads
 	if self._followThread then
@@ -454,7 +569,7 @@ function NPCPathfinder:_computePath(targetPosition: Vector3): boolean
 		self._waypoints = self._path:GetWaypoints()
 		-- Skip waypoint 1 (start position) — it's always at the NPC's current XZ,
 		-- and the Y mismatch (navmesh vs HumanoidRootPart hip height) causes
-		-- _traverseWaypointsNonBlocking's distance polling to get stuck.
+		-- distance checks to get stuck.
 		self._currentWaypointIndex = if #self._waypoints >= 2 then 2 else 1
 		return true
 	end
@@ -512,40 +627,6 @@ function NPCPathfinder:_traverseWaypoints(): boolean
 	return true
 end
 
-function NPCPathfinder:_traverseWaypointsNonBlocking(duration: number)
-	local startTime = tick()
-
-	for i = self._currentWaypointIndex, #self._waypoints do
-		if not self._isMoving or self._isDestroyed then
-			break
-		end
-		if tick() - startTime > duration * 0.8 then
-			break
-		end
-
-		self._currentWaypointIndex = i
-		local waypoint = self._waypoints[i]
-
-		if waypoint.Action == Enum.PathWaypointAction.Custom then
-			self:_handleCustomWaypoint(waypoint)
-			continue
-		end
-
-		self._humanoid:MoveTo(waypoint.Position)
-
-		if waypoint.Action == Enum.PathWaypointAction.Jump then
-			self._humanoid.Jump = true
-		end
-
-		-- Brief wait for movement
-		local waitStart = tick()
-		repeat
-			task.wait(0.1)
-			local dist = (self._rootPart.Position - waypoint.Position).Magnitude
-		until dist <= self._config.WaypointReachDistance or tick() - waitStart > 2 or not self._isMoving
-	end
-end
-
 function NPCPathfinder:_waitForMoveComplete(targetPosition: Vector3): boolean
 	local startTime = tick()
 
@@ -579,6 +660,31 @@ function NPCPathfinder:_directMoveTo(targetPosition: Vector3): boolean
 	return result
 end
 
+function NPCPathfinder:_destroyVisualWaypoints()
+	for _, part in self._visualWaypoints do
+		part:Destroy()
+	end
+	table.clear(self._visualWaypoints)
+end
+
+function NPCPathfinder:_createVisualWaypoints()
+	self:_destroyVisualWaypoints()
+	for i, waypoint in self._waypoints do
+		local marker = waypointTemplate:Clone()
+		marker.Position = waypoint.Position
+		-- Color coding: green=destination, red=jump, orange=normal
+		if i == #self._waypoints then
+			marker.Color = Color3.fromRGB(34, 197, 94) -- Green (destination)
+		elseif waypoint.Action == Enum.PathWaypointAction.Jump then
+			marker.Color = Color3.fromRGB(239, 68, 68) -- Red (jump)
+		else
+			marker.Color = Color3.fromRGB(255, 139, 0) -- Orange (normal)
+		end
+		marker.Parent = Workspace
+		table.insert(self._visualWaypoints, marker)
+	end
+end
+
 function NPCPathfinder:_hasLineOfSight(targetPosition: Vector3): boolean
 	local origin = self._rootPart.Position
 	local direction = targetPosition - origin
@@ -592,6 +698,8 @@ end
 
 function NPCPathfinder:_onPathBlocked(blockedWaypointIndex: number)
 	if blockedWaypointIndex >= self._currentWaypointIndex and self._isMoving then
+		-- Try jumping over the obstruction first (cheaper than full recompute)
+		self._humanoid.Jump = true
 		task.defer(function()
 			if self._isMoving and not self._isDestroyed and #self._waypoints > 0 then
 				local lastWaypoint = self._waypoints[#self._waypoints]
