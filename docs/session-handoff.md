@@ -1,16 +1,19 @@
 # Session Handoff
 
-> Updated: 2026-02-23 (Session 6)
-> Focus: Phase 1 UI — debug state labels above NPC heads
+> Updated: 2026-02-23 (Session 7)
+> Focus: Documentation audit — backporting lessons learned into skill, convention, and pattern docs
 
 ---
 
 ## What Got Done
 
-- **NPC state label BillboardGuis**: Color-coded labels above each NPC's head showing current state (Idle/Chasing/Patrolling/Wandering). Gated behind `GameConfig.GAME.DEBUG`.
-- **`onStateChanged` callback on NPCStateMachine**: New optional 4th parameter fires on initial state and every `transitionTo`. Event-driven (not polling). Cleared in `destroy()`.
-- **Config-driven label styling**: `GameConfig.NPC.STATE_LABEL` controls size, offset, font, text size, per-state colors, and default color. Colors match existing `UI.COLORS` palette semantics (yellow=passive, red=danger, blue=routine, green=exploratory).
-- **CLAUDE.md updated**: Added `onStateChanged` callback to NPCStateMachine module description and debug state labels to NPC Pathfinding System section.
+- **SKILL.md bug fix**: Quick start code iterated all waypoints (`for _, waypoint in waypoints do`) — contradicted the lesson that waypoint 1 is the start position. Fixed to `for i = 2, #waypoints do` with explanatory comment.
+- **SKILL.md expanded**: Added 6 new symptoms to Scenario 4 debugging table (rapid recomputation, stuck after knockover, stale MoveToFinished, XZ vs 3D mismatch, SpawnLocation collision, stop() thread kill). Strengthened `PathfindingUseImprovedSearch` with "not scriptable" warning. Updated Wander row with obstacle validation guidance.
+- **common-pitfalls.md expanded**: Added 3 new causes to "NPC moves but gets stuck" (SpawnLocation, humanoid states, waypoint index 1). Added 3 new sections: rapid recomputation, stop() thread kill, MoveToFinished/distance check disagreement.
+- **behavior-patterns.md updated**: Wander `findRandomPoint` now rejects hits on obstacle parts with example code.
+- **luau-conventions.md expanded**: New "Colon vs Dot Method Calls" section. `task.cancel` self-reference gotcha in Task Library section.
+- **luau-patterns.md expanded**: New "Safe Multi-Module Initialization" pattern with bad/good pcall examples.
+- **lessons-learned.md updated**: Added session entry about docs-vs-lessons drift.
 
 ## What's Next
 
@@ -29,13 +32,12 @@
 
 ### What Worked
 
-- **Plan-first with subagents**: Explore agent mapped the full integration surface (state machine API, existing BillboardGui pattern, GameConfig structure) before writing code. Zero iteration needed during implementation.
-- **`onStateChanged` callback pattern**: Adding the callback to the state machine constructor (not just `transitionTo`) was essential — Patrol and Wander NPCs never transition, so their labels would have stayed blank without the initial-state notification.
-- **Reusing existing patterns**: The name label BillboardGui in `createNPCModel` served as a direct template for the state label. Same property structure, just different offset and dynamic text.
+- **Systematic audit approach**: Reading all four docs (lessons, skill, conventions, patterns) in parallel made contradictions immediately visible — especially the waypoint iteration bug which was actively teaching the wrong pattern.
+- **Lessons-learned as source of truth**: The lessons file captured real debugging sessions with specific symptoms. Backporting these into skill reference docs means future sessions get the fix upfront instead of rediscovering it.
 
 ### What Broke
 
-- Nothing. Clean session — lint, format, and build all passed first try (StyLua auto-format adjusted line wrapping, but no logic issues).
+- Nothing. Documentation-only session — no code changes, no build/lint needed.
 
 ### Wrong Assumptions
 
@@ -45,13 +47,12 @@
 
 ## Key Architecture Notes for Next Session
 
-- **State labels are server-side BillboardGuis** — created in NPCManager, replicated automatically to clients. No client code involved.
-- **`makeStateLabelUpdater()` returns nil when DEBUG is false** — passed as the 4th arg to `NPCStateMachine.new()`, meaning zero overhead in production (no callback stored, no closure allocated).
-- **State label cleanup is automatic** — BillboardGui parented to Head → destroyed with model. `_onStateChanged` cleared in `destroy()`.
-- **`GameConfig.NPC.STATE_LABEL.COLORS`** maps state name strings to Color3 values. Adding a new state just needs a new entry here plus a `DEFAULT_COLOR` fallback for unmapped states.
+- **Skill docs now reflect all known pathfinding pitfalls** from sessions 1–6. No known gaps between lessons-learned and reference docs.
+- **luau-conventions.md and luau-patterns.md are general-purpose** — not pathfinding-specific. The additions (colon/dot, task.cancel, multi-init pcall) apply to any Roblox project.
+- **The `.claude/skills/roblox-npc-pathfinding/` directory is untracked in git** — these files exist locally but haven't been committed yet. They'll be included in this session's commit.
 
 ---
 
 ## CLAUDE.md Suggestions
 
-None — CLAUDE.md was updated this session with `onStateChanged` callback and debug state labels.
+None — CLAUDE.md is accurate. No architectural changes this session.

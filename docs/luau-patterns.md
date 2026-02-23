@@ -395,6 +395,48 @@ end
 
 ---
 
+## Safe Multi-Module Initialization
+
+> **When:** A server script initializes multiple modules in sequence — game setup, system bootstrapping, any `init.server.luau` that calls `Module.initialize()` on several systems.
+>
+> **Why:** Wrapping multiple module inits in a single `pcall` hides which module failed. If module A errors, module B silently never runs, and the error message points at module A but you don't know B was skipped. This is especially bad when module B depends on module A having succeeded.
+>
+> **Related:** Error Handling in conventions (pcall patterns)
+
+```luau
+-- ❌ Bad: single pcall hides which module failed
+local success, err = pcall(function()
+    MapSetup.initialize()
+    NPCManager.initialize()
+    QuestSystem.initialize()
+end)
+if not success then
+    warn("Init failed:", err) -- Which module? Was NPCManager even attempted?
+end
+
+-- ✅ Good: each module gets its own pcall with clear logging
+local function safeInit(name: string, initFn: () -> ()): boolean
+    local success, err = pcall(initFn)
+    if not success then
+        warn(`[Init] {name} failed: {err}`)
+    end
+    return success
+end
+
+local mapOk = safeInit("MapSetup", MapSetup.initialize)
+local npcOk = safeInit("NPCManager", NPCManager.initialize)
+local questOk = safeInit("QuestSystem", QuestSystem.initialize)
+
+-- Now you know exactly what succeeded and can make informed decisions
+if not mapOk then
+    warn("[Init] Map failed — NPCs may path incorrectly")
+end
+```
+
+If modules have dependencies (NPCManager needs MapSetup to have run first), check the predecessor's result before attempting the dependent init.
+
+---
+
 ## Model Animation (CFrameValue + PivotTo)
 
 > **When:** Tweening an entire Model's position/rotation — doors opening, platforms moving, objects animating to a target position. TweenService cannot directly tween `Model:PivotTo()`.

@@ -56,3 +56,7 @@
 - **[Roblox]** Don't disable `FallingDown`/`GettingUp`/`Freefall`/`Landed` humanoid states when the NPC operates around physical obstacles. These states form the physics recovery cycle — without them, a knocked-over NPC stays down permanently. Only disable on flat geometry with no collision risk.
 
 - **[Architecture]** Don't generate random NPC movement targets without validating against obstacle geometry. Use `Workspace:Raycast` downward to confirm the point is on walkable ground, not inside/on top of an obstacle. Also use the raycast hit position for accurate Y-snapping.
+
+## Session: 2026-02-23 — Docs Audit vs Lessons Learned
+
+- **[Docs]** Don't assume skill reference docs stay in sync with lessons learned. The SKILL.md quick start code iterated all waypoints (`for _, waypoint in waypoints do`) while lessons explicitly said to skip index 1. Periodically audit skill assets, conventions, and patterns docs against accumulated lessons to catch contradictions.

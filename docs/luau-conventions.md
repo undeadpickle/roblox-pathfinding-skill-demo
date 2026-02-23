@@ -38,6 +38,8 @@ Style rules and principles for Roblox Luau development. For implementation recip
 | `task.defer(fn)` | — |
 | `task.cancel(thread)` | — |
 
+**`task.cancel` gotcha:** Calling `task.cancel` on the *currently executing* thread kills it silently mid-function. No error, no warning — execution just stops. If a `stop()` method cancels a movement thread, never call `stop()` from within that thread. Use a flag (`_shouldStop = true`) that the thread checks each iteration, or use a separate reset method for internal callers.
+
 ## Service Access
 
 Always use `game:GetService()`:
@@ -144,6 +146,24 @@ end
 
 return MyModule
 ```
+
+## Colon vs Dot Method Calls
+
+Calling a method with `.` instead of `:` is a **runtime** error, not a type error. Luau won't catch it at analysis time — the call silently passes the wrong arguments.
+
+```luau
+-- Given an instance-based module:
+local log = Logger.new("MyModule")
+
+-- ✅ Correct: colon passes `self` implicitly
+log:info("Starting up")
+
+-- ❌ Wrong: dot does NOT pass self — "Starting up" becomes `self`
+log.info("Starting up")
+-- This either errors at runtime or silently misbehaves
+```
+
+**Rule of thumb:** If the function was defined with `:` (e.g., `function Foo:bar()`), call it with `:`. If defined with `.` (e.g., `function Foo.bar()`), call it with `.`. Mixing them is the most common source of "works in your head, crashes at runtime" bugs in Luau.
 
 ## Error Handling
 
