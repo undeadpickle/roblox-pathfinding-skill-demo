@@ -18,14 +18,10 @@ local success, err = pcall(function()
 
 	local function onPlayerAdded(player: Player): ()
 		log:info("Player joined:", player.Name)
-
-		-- TODO: Initialize player data, setup, etc.
 	end
 
 	local function onPlayerRemoving(player: Player): ()
 		log:info("Player leaving:", player.Name)
-
-		-- TODO: Save player data, cleanup, etc.
 	end
 
 	local function initialize(): ()

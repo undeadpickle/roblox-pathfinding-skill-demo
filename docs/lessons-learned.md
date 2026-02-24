@@ -102,3 +102,15 @@
 - **[Roblox]** Don't assume wander beam/marker toggle state persists across state cycles. Wander's `onEnter` recreates visuals each cycle, ignoring the debug toggle. Store a `_wanderBeamVisible` flag on the NPC entry and check it before creating visuals.
 
 - **[UX]** Don't let NPC states transition faster than the UI can display them. Guard's Returning state completed in 1-2 frames when near a waypoint, making it invisible in the debug panel. Add a minimum dwell time (`RETURN_DWELL`) so transient states are observable.
+
+## Session: 2026-02-24 — Refactor & Debug Panel Enhancements
+
+- **[Architecture]** Don't let a single module define both orchestration logic and behavior state definitions. NPCManager at 1,147 lines mixed spawning, state defs, debug visuals, and public API. Extract state definitions into per-behavior modules (`behaviors/ChaseStates.luau`, etc.) so adding a new NPC type doesn't require understanding the entire file.
+
+- **[Architecture]** Don't duplicate factory functions that differ only in config values. `createWaypointMarkers` and `createGuardWaypointMarkers` were 90% identical (different color and line-drawing). Parameterize with a config object (`color`, `showLines`) instead of copy-pasting.
+
+- **[Luau]** Don't access private fields (`ctx.pathfinder._isMoving = true`) from outside the owning module. It bypasses state tracking and breaks if internals change. In this case the write was redundant — `moveTo` already calls `_resetMovement()` which sets the flag. Trace the call graph before assuming you need to set internal state.
+
+- **[Architecture]** Don't let behavior defaults overwrite debug panel overrides on state transitions. `followTarget` was called on every new chase and reset `_visualizeEnabled = options.visualize`, clobbering the panel's toggle. Use a `_visualizeOverride` field (nil = use behavior default, boolean = panel override) so the debug toggle persists across state re-entries. Other visual types (discs, labels, markers) didn't have this problem because they're created once and never recreated.
+
+- **[Luau]** Don't use `any` for typed fields when `typeof()` works. Luau's `typeof(Module.new(nil :: any))` captures the full metatable type without needing explicit export types, providing autocomplete and type checking on fields like `pathfinder` and `stateMachine`.

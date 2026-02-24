@@ -29,26 +29,6 @@
       "type": "shell",
       "command": "stylua src/",
       "problemMatcher": []
-    },
-    {
-      "label": "Run Tests (Lune)",
-      "type": "shell",
-      "command": "lune run scripts/run-tests.luau",
-      "problemMatcher": [],
-      "presentation": {
-        "reveal": "always",
-        "panel": "shared"
-      }
-    },
-    {
-      "label": "Run Tests (Studio)",
-      "type": "shell",
-      "command": "run-in-roblox --place game.rbxl --script scripts/run-tests.luau",
-      "problemMatcher": [],
-      "presentation": {
-        "reveal": "always",
-        "panel": "shared"
-      }
     }
   ]
 }

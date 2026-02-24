@@ -116,6 +116,8 @@ function NPCPathfinder.new(npcModel: Model, config: { [string]: any }?)
 	self._lastProgressTime = tick()
 	self._lastArrivalTime = nil :: number?
 	self._visualWaypoints = {} :: { Part }
+	self._visualizeEnabled = false
+	self._visualizeOverride = nil :: boolean? -- debug panel override (nil = use default)
 
 	-- Connections (tracked for cleanup)
 	self._connections = {}
@@ -188,7 +190,12 @@ function NPCPathfinder:followTarget(target: Model, options: { [string]: any }?)
 	local arrivalDistance = options.arrivalDistance or 5
 	local onArrival = options.onArrival
 	local onTargetLost = options.onTargetLost
-	local visualize = options.visualize or false
+	-- Debug panel override wins over behavior default
+	if self._visualizeOverride ~= nil then
+		self._visualizeEnabled = self._visualizeOverride
+	else
+		self._visualizeEnabled = options.visualize or false
+	end
 	local tickRate = 0.1
 	local stuckCheckInterval = 2.0
 
@@ -294,7 +301,7 @@ function NPCPathfinder:followTarget(target: Model, options: { [string]: any }?)
 			if timeSinceRecompute >= recomputeInterval then
 				timeSinceRecompute = 0
 				local pathFound = self:_computePath(targetPos)
-				if pathFound and visualize then
+				if pathFound and self._visualizeEnabled then
 					self:_createVisualWaypoints()
 				end
 			end
@@ -338,7 +345,7 @@ function NPCPathfinder:followTarget(target: Model, options: { [string]: any }?)
 				log:debug("Chase NPC stuck — jumping and recomputing path")
 				self._humanoid.Jump = true
 				self:_computePath(targetPos)
-				if visualize then
+				if self._visualizeEnabled then
 					self:_createVisualWaypoints()
 				end
 				self._lastProgressPosition = self._rootPart.Position
@@ -447,6 +454,18 @@ end
 
 function NPCPathfinder:isMoving(): boolean
 	return self._isMoving
+end
+
+--- Toggle chase path dot visualization at runtime (used by debug panel).
+--- Sets a persistent override that survives followTarget restarts.
+--- When disabled, immediately destroys existing dots and suppresses future creation.
+--- When re-enabled, dots appear on the next path recomputation.
+function NPCPathfinder:setVisualizeEnabled(enabled: boolean): ()
+	self._visualizeOverride = enabled
+	self._visualizeEnabled = enabled
+	if not enabled then
+		self:_destroyVisualWaypoints()
+	end
 end
 
 function NPCPathfinder:getConfig(): { [string]: any }

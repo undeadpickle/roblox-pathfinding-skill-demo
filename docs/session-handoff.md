@@ -1,43 +1,58 @@
 # Session Handoff
 
-> Updated: 2026-02-23 (Session 11)
-> Focus: Debug Panel MVP — live NPC status, visual toggles, teleport, state change push
+> Updated: 2026-02-24 (Session 12)
+> Focus: NPCManager refactor (behavior extraction), debug panel enhancements, chase path dot override fix
 
 ---
 
 ## What Got Done
 
-- **Debug Panel MVP**: Full client-side debug panel with 3 sections: Visual Toggles, NPC Status, Teleport. Toggle with F8 key. Raw Roblox UI (no framework).
-- **4 new files**: `DebugRemotes.luau` (shared remote name constants), `DebugService.luau` (server remote handlers), `DebugPanelUI.luau` (UI factories), `DebugPanel.luau` (client logic).
-- **NPCManager debug API**: Added `getAllNPCStatus(playerPos)`, `setDebugVisualEnabled(npcName, visualType, enabled)`, `setDebugStateCallback(callback)`. Status returns state, position, distance, LOS, isMoving, walkSpeed, detectionRadius, behaviorType per NPC.
-- **Hybrid polling + push**: Client polls server every 0.5s for full status data. State changes pushed instantly via `NPC_STATE_CHANGED` RemoteEvent for immediate label updates.
-- **Per-visual toggles**: 4 toggle types — detection discs (transparency), state labels (BillboardGui.Enabled), waypoint markers (folder children), wander beam (flag + instances). Each toggle fires for all NPCs.
-- **Teleport buttons**: 2x2 grid teleporting player to each NPC's spawn zone with 5-stud offset.
-- **Wander beam toggle persistence**: Added `_wanderBeamVisible` flag to NPCEntry so beam/marker toggle state survives state cycle recreation.
-- **State change callback chaining**: Modified `makeStateLabelUpdater` to accept `npcName` param and chain a debug callback alongside the in-world label updater.
-- **Guard Returning dwell time**: Added `RETURN_DWELL = 0.8` config so Returning state is observable in the debug panel (was completing in 1-2 frames).
-- **F9→F8 key change**: F9 conflicts with Roblox Developer Console in Studio play mode. Changed to F8.
-- **Pre-mortem caught 3 issues**: Single callback blocker, wander beam persistence risk, RemoteFunction validator mismatch.
+### Refactor (T1-T5 from plan)
+
+- **T1 — Behavior extraction**: Split NPCManager (1,147 lines) into 6 focused modules. NPCManager is now a ~530-line orchestrator. State definitions live in `src/server/modules/behaviors/`:
+  - `ChaseStates.luau` — Idle ↔ Chasing
+  - `PatrolStates.luau` — Patrolling
+  - `WanderStates.luau` — Wandering
+  - `GuardStates.luau` — Guarding ↔ Chasing ↔ Returning
+  - `BehaviorHelpers.luau` — Shared utilities (findNearestPlayer, getRandomPointInRadius, createWaypointMarkers, evaluateChaseTarget)
+- **T2 — Type holes**: Replaced `any` on `pathfinder` and `stateMachine` NPCEntry fields with `typeof()` pattern. Added `guardReturnDwell: number?`.
+- **T3 — Encapsulation fix**: Removed `ctx.pathfinder._isMoving = true` from GuardStates (was redundant — `moveTo` handles it).
+- **T4 — Merged waypoint factories**: `createWaypointMarkers` and `createGuardWaypointMarkers` consolidated into single `BehaviorHelpers.createWaypointMarkers(waypoints, color, showLines)`.
+- **T5 — Cleanup**: Removed stale VS Code test tasks, removed empty TODO stubs from init files.
+
+### Debug Panel Enhancements
+
+- **3 new toggle types**: Chase Path Dots (`chasePath`), Name Labels (`nameLabel`), Waypoint Numbers (`waypointNumbers`).
+- **Toggle All**: Master on/off switch that syncs all individual toggles and fires remotes for every visual type on every NPC.
+- **NPCPathfinder.setVisualizeEnabled()**: New public method for toggling chase path dot visualization from debug panel.
+
+### Bug Fix — Chase Path Dots Override
+
+- **Problem**: Toggling off chase path dots in debug panel worked momentarily, but dots reappeared when NPCs started new chases (state transitions called `followTarget` which reset `_visualizeEnabled` from config default).
+- **Fix**: Added `_visualizeOverride` field to NPCPathfinder. When set by debug panel, it takes precedence over the behavior default. `nil` = use behavior default, `boolean` = panel override.
 
 ## Files Changed
 
-- `src/shared/DebugRemotes.luau` — **NEW** — Remote name string constants
-- `src/server/modules/DebugService.luau` — **NEW** — Server remote handlers (status, toggle, teleport, state push)
-- `src/client/modules/DebugPanelUI.luau` — **NEW** — UI factory functions (panel, sections, toggles, status rows, buttons, teleport grid)
-- `src/client/modules/DebugPanel.luau` — **NEW** — Client panel logic (polling, toggles, teleport, F8 key binding)
-- `src/server/modules/NPCManager.luau` — Added debug API methods, wander beam flag, state callback chaining, Guard return dwell
-- `src/shared/GameConfig.luau` — Added `GUARD.RETURN_DWELL = 0.8`
-- `src/client/init.client.luau` — Wired DebugPanel.initialize()
-- `src/server/init.server.luau` — Wired DebugService.initialize() after NPCManager
-- `docs/lessons-learned.md` — 5 new rules (F9 conflict, onInvoke validator, callback chaining, beam persistence, dwell time)
-- `CLAUDE.md` — Updated overview, key modules, debug panel architecture notes
+- `src/server/modules/behaviors/BehaviorHelpers.luau` — **NEW** — Shared behavior utilities
+- `src/server/modules/behaviors/ChaseStates.luau` — **NEW** — Chase state definitions
+- `src/server/modules/behaviors/PatrolStates.luau` — **NEW** — Patrol state definitions
+- `src/server/modules/behaviors/WanderStates.luau` — **NEW** — Wander state definitions
+- `src/server/modules/behaviors/GuardStates.luau` — **NEW** — Guard state definitions
+- `src/server/modules/NPCManager.luau` — Reduced from 1,147 to ~530 lines, imports behavior modules, expanded `setDebugVisualEnabled` with new visual types
+- `src/server/modules/NPCPathfinder.luau` — Added `_visualizeOverride`, `setVisualizeEnabled()`, override-aware `followTarget`
+- `src/client/modules/DebugPanel.luau` — Added 3 new toggle rows, Toggle All master switch, toggle updater sync
+- `src/client/init.client.luau` — Removed empty TODO stub
+- `src/server/init.server.luau` — Removed empty TODO stubs
+- `.vscode/tasks.json` — Removed stale test tasks
+- `CLAUDE.md` — Updated Key Modules, debug panel description
+- `docs/lessons-learned.md` — 5 new rules from this session
 
 ## What's Next
 
-1. **Debug panel follow-up**: Force state transitions, respawn individual NPCs, tuning sliders (walk speed, detection radius, patrol pause)
-2. **Playtest verification**: Stairs pathfinding, NPC orientation during chase, wander beam rendering
+1. **Playtest verification**: Confirm all 4 NPCs behave identically after refactor in Studio
+2. **Debug panel follow-up**: Force state transitions, respawn individual NPCs, tuning sliders
 3. **More elevation variety**: Ramps, platforms, multi-level terrain
-4. **Phase 1 core loop**: Player-facing UI (Fusion candidate), one complete player flow
+4. **Phase 1 core loop**: Player-facing UI, one complete player flow
 
 ## Blockers
 
@@ -45,35 +60,13 @@ None.
 
 ---
 
-## Session Retrospective
-
-### What Worked
-
-- **Pre-mortem prevented 3 bugs**: The `onStateChanged` single-callback blocker (would have overwritten in-world label updater), wander beam toggle not persisting across state cycles (would silently reset on each wander loop), and `Remotes.onInvoke` validator mismatch (no client data to validate).
-- **Reusing GameConfig patterns**: `UI.COLORS`, `UI.FONTS`, `STATE_LABEL.COLORS` — all existed but were unused. Debug panel gave them consumers without adding new config.
-- **`isMoving()` found its purpose**: NPCPathfinder's `isMoving()` was flagged as unused in cleanup. Debug panel status readout now uses it.
-- **Clean client-server separation**: Server is source of truth. Client is a dumb terminal — sends commands, displays data, never touches NPC state directly.
-
-### What Broke
-
-- **F9 key conflict**: F9 opens Roblox Developer Console in Studio play mode. Was predicted in plan gotchas, confirmed by user screenshot. Switched to F8.
-- **Guard Returning state invisible**: Returning completed in 1-2 frames when guard was near a waypoint. `moveTo` resolved nearly instantly, and the push event was overwritten by the next state. Fixed with `RETURN_DWELL = 0.8s` minimum.
-
-### Wrong Assumptions
-
-- Assumed F9 was safe despite noting the potential conflict in the plan. Should have defaulted to F8 from the start.
-- Assumed instant state transitions would be observable in a 0.5s polling UI. Even with push events, transitions under ~2 frames are effectively invisible in the panel.
-
----
-
 ## Key Architecture Notes for Next Session
 
-- **Debug panel toggle**: F8 key. Panel starts hidden (`ScreenGui.Enabled = false`). Polling starts/stops with panel visibility.
-- **Remote architecture**: `DebugRemotes.luau` holds string constants. `Remotes.getEvent()`/`getFunction()` used for all communication. No custom remote creation — reuses existing Remotes module.
-- **Visual toggle types**: `"disc"` (transparency), `"stateLabel"` (BillboardGui.Enabled), `"waypoints"` (folder children toggle), `"wanderBeam"` (flag + instance toggle). Applied per-NPC from server.
-- **State push callback**: `NPCManager.setDebugStateCallback()` stores a module-level callback. `makeStateLabelUpdater` chains it with the in-world label updater. No changes to NPCStateMachine needed.
-- **Guard dwell**: `RETURN_DWELL = 0.8` in GameConfig. Returning `onUpdate` accumulates `guardReturnDwell` timer after waypoint reached before transitioning to Guarding.
-- **Follow-up scope**: Force state transitions (`stateMachine:transitionTo()`), respawn NPCs (extract spawn logic), tuning sliders (`_override` fields on NPCEntry).
+- **Behavior modules**: Each exports a `StateMap` table consumed by `NPCManager.initializeNPC()`. Shared helpers in `BehaviorHelpers.luau`.
+- **`_visualizeOverride` pattern**: NPCPathfinder field. `nil` = use behavior default from `options.visualize`. `boolean` = debug panel override that persists across `followTarget` restarts. Only needed for chase path dots — other visuals are created once and not recreated on state transitions.
+- **`typeof()` typing**: NPCEntry uses `typeof(NPCPathfinder.new(nil :: any))` for metatable class typing without needing explicit export types.
+- **Waypoint marker factory**: `BehaviorHelpers.createWaypointMarkers(waypoints, color, showLines)` — patrol uses yellow + lines, guard uses orange + no lines.
+- **`evaluateChaseTarget`**: Shared helper for chase target re-evaluation used by both ChaseStates and GuardStates. Takes config, target field name, fallback state, and LOS requirement flag.
 
 ---
 

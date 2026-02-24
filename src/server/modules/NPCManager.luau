@@ -14,6 +14,8 @@
 
 	NPCs are created as R15 rigs via Players:CreateHumanoidModelFromDescription().
 	Falls back to simple Part+Humanoid if R15 creation fails.
+
+	Behavior state definitions live in src/server/modules/behaviors/.
 ]]
 
 local Players = game:GetService("Players")
@@ -27,14 +29,21 @@ local Logger = require(Shared.Logger)
 local NPCPathfinder = require(script.Parent.NPCPathfinder)
 local NPCStateMachine = require(Shared.NPCStateMachine)
 
+-- Behavior state maps
+local BehaviorHelpers = require(script.Parent.behaviors.BehaviorHelpers)
+local ChaseStates = require(script.Parent.behaviors.ChaseStates)
+local GuardStates = require(script.Parent.behaviors.GuardStates)
+local PatrolStates = require(script.Parent.behaviors.PatrolStates)
+local WanderStates = require(script.Parent.behaviors.WanderStates)
+
 local log = Logger.new("NPCManager")
 
 local NPCManager = {}
 
 type NPCEntry = {
 	model: Model,
-	pathfinder: any,
-	stateMachine: any,
+	pathfinder: typeof(NPCPathfinder.new(nil :: any)),
+	stateMachine: typeof(NPCStateMachine.new("" :: any, {} :: any, {} :: any)),
 	behaviorType: string,
 	debugFolder: Folder?,
 	debugDisc: Part?,
@@ -55,6 +64,7 @@ type NPCEntry = {
 	guardDetectTimer: number?,
 	guardLastWaypointIndex: number?,
 	guardReachedWaypoint: boolean?,
+	guardReturnDwell: number?,
 }
 
 local activeNPCs: { [string]: NPCEntry } = {}
@@ -207,6 +217,46 @@ local function makeStateLabelUpdater(
 end
 
 -- ═══════════════════════════════════════════════════════════
+-- DEBUG VISUALS
+-- ═══════════════════════════════════════════════════════════
+
+local function createDetectionRadiusCircle(model: Model, radius: number, color: Color3): Part?
+	if not GameConfig.GAME.DEBUG then
+		return nil
+	end
+
+	local rootPart = model.PrimaryPart
+	if not rootPart then
+		return nil
+	end
+
+	local diameter = radius * 2
+	local disc = Instance.new("Part")
+	disc.Name = "DetectionRadiusDisc"
+	disc.Shape = Enum.PartType.Cylinder
+	-- Cylinder axis is along X, so X = thickness, Y/Z = diameter
+	disc.Size = Vector3.new(0.2, diameter, diameter)
+	-- Lay flat at ground level. Anchored + explicit CFrame update in PostSimulation tick.
+	disc.CFrame = CFrame.new(rootPart.Position.X, 0.15, rootPart.Position.Z) * CFrame.Angles(0, 0, math.rad(90))
+	disc.Anchored = true
+	disc.CanCollide = false
+	disc.CanTouch = false
+	disc.CanQuery = false
+	disc.CastShadow = false
+	disc.Material = Enum.Material.Neon
+	disc.Color = color
+	disc.Transparency = 0.85
+
+	disc.Parent = Workspace
+
+	log:debug(
+		`Detection disc created: diameter={diameter}, pos=({disc.Position.X}, {disc.Position.Y}, {disc.Position.Z})`
+	)
+
+	return disc
+end
+
+-- ═══════════════════════════════════════════════════════════
 -- SPAWNING
 -- ═══════════════════════════════════════════════════════════
 
@@ -239,684 +289,6 @@ local function spawnNPC(behaviorType: string, displayName: string, spawnPosition
 end
 
 -- ═══════════════════════════════════════════════════════════
--- HELPERS
--- ═══════════════════════════════════════════════════════════
-
-local function findNearestPlayer(position: Vector3): Model?
-	local nearest: Model? = nil
-	local nearestDist = math.huge
-
-	for _, player in Players:GetPlayers() do
-		local character = player.Character
-		if not character then
-			continue
-		end
-
-		local root = character:FindFirstChild("HumanoidRootPart")
-		if not root then
-			continue
-		end
-
-		local dist = ((root :: BasePart).Position - position).Magnitude
-		if dist < nearestDist then
-			nearest = character
-			nearestDist = dist
-		end
-	end
-
-	return nearest
-end
-
-local function createWaypointMarkers(waypoints: { Vector3 }): Folder
-	local folder = Instance.new("Folder")
-	folder.Name = "PatrolWaypointMarkers"
-
-	for i, wp in waypoints do
-		-- Marker sphere at each waypoint
-		local marker = Instance.new("Part")
-		marker.Name = `Waypoint_{i}`
-		marker.Shape = Enum.PartType.Ball
-		marker.Size = Vector3.new(2, 2, 2)
-		marker.Position = wp
-		marker.Anchored = true
-		marker.CanCollide = false
-		marker.CanTouch = false
-		marker.CanQuery = false
-		marker.Material = Enum.Material.Neon
-		marker.Color = Color3.fromRGB(250, 204, 21) -- Yellow
-		marker.Transparency = 0.5
-
-		-- Number label
-		local billboard = Instance.new("BillboardGui")
-		billboard.Size = UDim2.fromOffset(40, 40)
-		billboard.StudsOffset = Vector3.new(0, 2, 0)
-		billboard.AlwaysOnTop = true
-
-		local label = Instance.new("TextLabel")
-		label.Size = UDim2.fromScale(1, 1)
-		label.BackgroundTransparency = 1
-		label.Text = tostring(i)
-		label.TextColor3 = Color3.fromRGB(250, 204, 21)
-		label.TextStrokeTransparency = 0
-		label.Font = Enum.Font.GothamBold
-		label.TextScaled = true
-		label.Parent = billboard
-
-		billboard.Parent = marker
-		marker.Parent = folder
-
-		-- Line to next waypoint
-		local nextIndex = (i % #waypoints) + 1
-		local nextWp = waypoints[nextIndex]
-		local midpoint = (wp + nextWp) / 2
-		local direction = nextWp - wp
-
-		local line = Instance.new("Part")
-		line.Name = `Line_{i}_to_{nextIndex}`
-		line.Size = Vector3.new(0.2, 0.2, direction.Magnitude)
-		line.CFrame = CFrame.lookAt(midpoint, nextWp)
-		line.Anchored = true
-		line.CanCollide = false
-		line.CanTouch = false
-		line.CanQuery = false
-		line.Material = Enum.Material.Neon
-		line.Color = Color3.fromRGB(250, 204, 21)
-		line.Transparency = 0.7
-		line.Parent = folder
-	end
-
-	folder.Parent = Workspace
-	return folder
-end
-
-local function createGuardWaypointMarkers(waypoints: { Vector3 }): Folder
-	local folder = Instance.new("Folder")
-	folder.Name = "GuardWaypointMarkers"
-
-	for i, wp in waypoints do
-		local marker = Instance.new("Part")
-		marker.Name = `Waypoint_{i}`
-		marker.Shape = Enum.PartType.Ball
-		marker.Size = Vector3.new(2, 2, 2)
-		marker.Position = wp
-		marker.Anchored = true
-		marker.CanCollide = false
-		marker.CanTouch = false
-		marker.CanQuery = false
-		marker.Material = Enum.Material.Neon
-		marker.Color = Color3.fromRGB(255, 139, 0) -- Orange (guard)
-		marker.Transparency = 0.5
-		marker.CastShadow = false
-
-		local billboard = Instance.new("BillboardGui")
-		billboard.Size = UDim2.fromOffset(40, 40)
-		billboard.StudsOffset = Vector3.new(0, 2, 0)
-		billboard.AlwaysOnTop = true
-
-		local label = Instance.new("TextLabel")
-		label.Size = UDim2.fromScale(1, 1)
-		label.BackgroundTransparency = 1
-		label.Text = tostring(i)
-		label.TextColor3 = Color3.fromRGB(255, 139, 0)
-		label.TextStrokeTransparency = 0
-		label.Font = Enum.Font.GothamBold
-		label.TextScaled = true
-		label.Parent = billboard
-
-		billboard.Parent = marker
-		marker.Parent = folder
-		-- No connecting lines: guard patrol order is random
-	end
-
-	folder.Parent = Workspace
-	return folder
-end
-
-local function createDetectionRadiusCircle(model: Model, radius: number): Part?
-	if not GameConfig.GAME.DEBUG then
-		return nil
-	end
-
-	local rootPart = model.PrimaryPart
-	if not rootPart then
-		return nil
-	end
-
-	local diameter = radius * 2
-	local disc = Instance.new("Part")
-	disc.Name = "DetectionRadiusDisc"
-	disc.Shape = Enum.PartType.Cylinder
-	-- Cylinder axis is along X, so X = thickness, Y/Z = diameter
-	disc.Size = Vector3.new(0.2, diameter, diameter)
-	-- Lay flat at ground level. Anchored + explicit CFrame update in PostSimulation tick.
-	disc.CFrame = CFrame.new(rootPart.Position.X, 0.15, rootPart.Position.Z) * CFrame.Angles(0, 0, math.rad(90))
-	disc.Anchored = true
-	disc.CanCollide = false
-	disc.CanTouch = false
-	disc.CanQuery = false
-	disc.CastShadow = false
-	disc.Material = Enum.Material.Neon
-	disc.Color = Color3.fromRGB(239, 68, 68) -- Red (matches Chasing state color)
-	disc.Transparency = 0.85
-
-	disc.Parent = Workspace
-
-	log:debug(
-		`Detection disc created: diameter={diameter}, pos=({disc.Position.X}, {disc.Position.Y}, {disc.Position.Z})`
-	)
-
-	return disc
-end
-
-local cachedObstacleFolder: Folder? = nil
-
-local function getObstacleFolder(): Folder?
-	if not cachedObstacleFolder then
-		cachedObstacleFolder = Workspace:FindFirstChild("Obstacles") :: Folder?
-	end
-	return cachedObstacleFolder
-end
-
-local function getRandomPointInRadius(center: Vector3, radius: number): Vector3
-	local MAX_ATTEMPTS = 10
-	local obstacleFolder = getObstacleFolder()
-
-	for _ = 1, MAX_ATTEMPTS do
-		local angle = math.random() * math.pi * 2
-		local dist = math.random() * radius
-		local candidate = Vector3.new(center.X + math.cos(angle) * dist, center.Y, center.Z + math.sin(angle) * dist)
-
-		-- Raycast down from above to check for obstacle geometry at this XZ
-		local rayOrigin = Vector3.new(candidate.X, candidate.Y + 20, candidate.Z)
-		local rayResult = Workspace:Raycast(rayOrigin, Vector3.new(0, -40, 0))
-
-		if rayResult then
-			local hitPart = rayResult.Instance
-			-- Accept only if we hit the baseplate (ground), not an obstacle
-			if not obstacleFolder or not hitPart:IsDescendantOf(obstacleFolder) then
-				return Vector3.new(candidate.X, rayResult.Position.Y + 3, candidate.Z)
-			end
-		else
-			return candidate
-		end
-	end
-
-	-- Fallback: return center if all attempts hit obstacles
-	return center
-end
-
--- ═══════════════════════════════════════════════════════════
--- STATE DEFINITIONS
---
--- Each NPC type has a state map: { [stateName] = { onEnter, onUpdate, onExit } }
--- onUpdate returns a state name to transition, or nil to stay in the current state.
--- The "context" passed to each hook is the NPCEntry table for that NPC.
--- ═══════════════════════════════════════════════════════════
-
--- Chase NPC: Idle (scanning for players) → Chasing (following target)
-local CHASE_STATES: NPCStateMachine.StateMap = {
-	Idle = {
-		onEnter = function(ctx: NPCEntry)
-			ctx.pathfinder:stop()
-		end,
-
-		onUpdate = function(ctx: NPCEntry, _dt: number): string?
-			local rootPart = ctx.model.PrimaryPart
-			if not rootPart then
-				return nil
-			end
-
-			local target = findNearestPlayer(rootPart.Position)
-			if not target then
-				return nil
-			end
-
-			local targetRoot = target:FindFirstChild("HumanoidRootPart")
-			if not targetRoot then
-				return nil
-			end
-
-			local distance = ((targetRoot :: BasePart).Position - rootPart.Position).Magnitude
-			if distance <= GameConfig.NPC.CHASE.DETECTION_RADIUS then
-				-- Stash target so Chasing.onEnter can use it
-				ctx.chaseTarget = target
-				return "Chasing"
-			end
-
-			return nil
-		end,
-	},
-
-	Chasing = {
-		onEnter = function(ctx: NPCEntry)
-			local target = ctx.chaseTarget
-			if not target then
-				return
-			end
-
-			local config = GameConfig.NPC.CHASE
-			ctx.pathfinder:followTarget(target, {
-				recomputeInterval = config.RECOMPUTE_INTERVAL,
-				arrivalDistance = config.ARRIVAL_DISTANCE,
-				visualize = GameConfig.GAME.DEBUG,
-				onTargetLost = function()
-					log:debug("Chase NPC: target lost (callback)")
-				end,
-			})
-		end,
-
-		onUpdate = function(ctx: NPCEntry, dt: number): string?
-			local rootPart = ctx.model.PrimaryPart
-			if not rootPart then
-				return nil
-			end
-
-			-- Throttle re-evaluation (no need to check every frame)
-			ctx.chaseReevalTimer = (ctx.chaseReevalTimer or 0) + dt
-			if ctx.chaseReevalTimer < GameConfig.NPC.CHASE.REEVALUATE_INTERVAL then
-				return nil
-			end
-			ctx.chaseReevalTimer = 0
-
-			-- Is current target still valid and in range?
-			local currentTarget = ctx.chaseTarget
-			local currentTargetValid = false
-
-			if currentTarget and currentTarget:IsDescendantOf(game) then
-				local targetRoot = currentTarget:FindFirstChild("HumanoidRootPart")
-				if targetRoot then
-					local distance = ((targetRoot :: BasePart).Position - rootPart.Position).Magnitude
-					if distance <= GameConfig.NPC.CHASE.DETECTION_RADIUS then
-						currentTargetValid = true
-					end
-				end
-			end
-
-			if not currentTargetValid then
-				ctx.chaseTarget = nil
-				return "Idle"
-			end
-
-			-- Check if a closer player is now the better target
-			local nearest = findNearestPlayer(rootPart.Position)
-			if nearest and nearest ~= currentTarget then
-				local nearestRoot = nearest:FindFirstChild("HumanoidRootPart")
-				if nearestRoot then
-					local dist = ((nearestRoot :: BasePart).Position - rootPart.Position).Magnitude
-					if dist <= GameConfig.NPC.CHASE.DETECTION_RADIUS then
-						-- Self-transition: onExit stops old follow, onEnter starts new follow
-						ctx.chaseTarget = nearest
-						return "Chasing"
-					end
-				end
-			end
-
-			return nil
-		end,
-
-		onExit = function(ctx: NPCEntry)
-			ctx.pathfinder:stop()
-			ctx.chaseReevalTimer = nil
-		end,
-	},
-}
-
--- Patrol NPC: single state (extensible — add Alert/Chase states later)
-local PATROL_STATES: NPCStateMachine.StateMap = {
-	Patrolling = {
-		onEnter = function(ctx: NPCEntry)
-			local config = GameConfig.NPC.PATROL
-
-			if GameConfig.GAME.DEBUG and not ctx.debugFolder then
-				ctx.debugFolder = createWaypointMarkers(config.WAYPOINTS)
-			end
-
-			ctx.pathfinder:patrol(config.WAYPOINTS, {
-				loopMode = config.LOOP_MODE,
-				waitTime = config.WAIT_TIME,
-				onWaypoint = function(index: number)
-					log:debug(`Patrol NPC: reached waypoint {index}`)
-				end,
-			})
-			log:info("Patrol behavior started")
-		end,
-
-		onExit = function(ctx: NPCEntry)
-			ctx.pathfinder:stop()
-		end,
-	},
-}
-
--- Wander NPC: single state (extensible — add Flee/Curious states later)
-local WANDER_STATES: NPCStateMachine.StateMap = {
-	Wandering = {
-		onEnter = function(ctx: NPCEntry)
-			local config = GameConfig.NPC.WANDER
-
-			-- Debug: beam from NPC to current wander target + marker sphere
-			local targetMarker: Part? = nil
-			local beamHidden = ctx._wanderBeamVisible == false -- respect debug panel toggle
-			if GameConfig.GAME.DEBUG then
-				local rootPart = ctx.model.PrimaryPart
-				if rootPart then
-					-- Attachment on NPC root (beam start)
-					local npcAttachment = Instance.new("Attachment")
-					npcAttachment.Parent = rootPart
-					ctx.wanderNpcAttachment = npcAttachment
-
-					-- Target marker sphere
-					targetMarker = Instance.new("Part")
-					targetMarker.Name = "WanderTargetMarker"
-					targetMarker.Shape = Enum.PartType.Ball
-					targetMarker.Size = Vector3.new(1, 1, 1)
-					targetMarker.Anchored = true
-					targetMarker.CanCollide = false
-					targetMarker.CanTouch = false
-					targetMarker.CanQuery = false
-					targetMarker.CastShadow = false
-					targetMarker.Material = Enum.Material.Neon
-					targetMarker.Color = Color3.fromRGB(34, 197, 94) -- Green (Wandering state color)
-					targetMarker.Transparency = if beamHidden then 1 else 0.3
-					targetMarker.Parent = Workspace
-					ctx.wanderTargetMarker = targetMarker
-
-					-- Attachment on target marker (beam end)
-					local targetAttachment = Instance.new("Attachment")
-					targetAttachment.Parent = targetMarker
-
-					-- Beam connecting NPC to target
-					local beam = Instance.new("Beam")
-					beam.Attachment0 = npcAttachment
-					beam.Attachment1 = targetAttachment
-					beam.Width0 = 0.2
-					beam.Width1 = 0.2
-					beam.Color = ColorSequence.new(Color3.fromRGB(34, 197, 94))
-					beam.Transparency = NumberSequence.new(if beamHidden then 1 else 0.5)
-					beam.FaceCamera = true
-					beam.Parent = npcAttachment
-				end
-			end
-
-			ctx.wanderThread = task.spawn(function()
-				while ctx.model and ctx.model:IsDescendantOf(game) do
-					local target = getRandomPointInRadius(config.CENTER, config.RADIUS)
-
-					-- Update debug marker position
-					if targetMarker then
-						targetMarker.Position = target
-					end
-
-					local reached = ctx.pathfinder:moveTo(target)
-
-					if reached then
-						log:debug("Wander NPC: reached point, pausing")
-					end
-
-					local pause = config.PAUSE_MIN + math.random() * (config.PAUSE_MAX - config.PAUSE_MIN)
-					task.wait(pause)
-				end
-			end)
-		end,
-
-		onExit = function(ctx: NPCEntry)
-			if ctx.wanderThread then
-				task.cancel(ctx.wanderThread)
-				ctx.wanderThread = nil
-			end
-			-- Clean up debug visualization (beam destroyed with npcAttachment)
-			if ctx.wanderNpcAttachment then
-				ctx.wanderNpcAttachment:Destroy()
-				ctx.wanderNpcAttachment = nil
-			end
-			if ctx.wanderTargetMarker then
-				ctx.wanderTargetMarker:Destroy()
-				ctx.wanderTargetMarker = nil
-			end
-			ctx.pathfinder:stop()
-		end,
-	},
-}
-
--- Guard NPC: random patrol → LOS-triggered chase → return to post
-local GUARD_STATES: NPCStateMachine.StateMap = {
-	Guarding = {
-		onEnter = function(ctx: NPCEntry)
-			local config = GameConfig.NPC.GUARD
-
-			if GameConfig.GAME.DEBUG and not ctx.debugFolder then
-				ctx.debugFolder = createGuardWaypointMarkers(config.WAYPOINTS)
-			end
-
-			local lastIndex = ctx.guardLastWaypointIndex or 0
-			ctx.guardPatrolThread = task.spawn(function()
-				while ctx.model and ctx.model:IsDescendantOf(game) do
-					-- Pick random waypoint, excluding the last one visited
-					local candidates = {}
-					for i = 1, #config.WAYPOINTS do
-						if i ~= lastIndex then
-							table.insert(candidates, i)
-						end
-					end
-					local nextIndex = candidates[math.random(1, #candidates)]
-					lastIndex = nextIndex
-					ctx.guardLastWaypointIndex = nextIndex
-
-					log:debug(`Guard NPC: heading to waypoint {nextIndex}`)
-					ctx.pathfinder._isMoving = true
-					ctx.pathfinder:moveTo(config.WAYPOINTS[nextIndex])
-
-					task.wait(config.PATROL_PAUSE)
-				end
-			end)
-		end,
-
-		onUpdate = function(ctx: NPCEntry, dt: number): string?
-			-- Throttle detection (no need to raycast every frame)
-			ctx.guardDetectTimer = (ctx.guardDetectTimer or 0) + dt
-			if ctx.guardDetectTimer < GameConfig.NPC.GUARD.DETECT_INTERVAL then
-				return nil
-			end
-			ctx.guardDetectTimer = 0
-
-			local rootPart = ctx.model.PrimaryPart
-			if not rootPart then
-				return nil
-			end
-
-			local target = findNearestPlayer(rootPart.Position)
-			if not target then
-				return nil
-			end
-
-			local targetRoot = target:FindFirstChild("HumanoidRootPart")
-			if not targetRoot then
-				return nil
-			end
-
-			local distance = ((targetRoot :: BasePart).Position - rootPart.Position).Magnitude
-			if distance <= GameConfig.NPC.GUARD.DETECTION_RADIUS then
-				if ctx.pathfinder:hasLineOfSight((targetRoot :: BasePart).Position, { target }) then
-					ctx.guardTarget = target
-					return "Chasing"
-				end
-			end
-
-			return nil
-		end,
-
-		onExit = function(ctx: NPCEntry)
-			if ctx.guardPatrolThread then
-				task.cancel(ctx.guardPatrolThread)
-				ctx.guardPatrolThread = nil
-			end
-			ctx.guardDetectTimer = nil
-			ctx.pathfinder:stop()
-		end,
-	},
-
-	Chasing = {
-		onEnter = function(ctx: NPCEntry)
-			local target = ctx.guardTarget
-			if not target then
-				return
-			end
-
-			local config = GameConfig.NPC.GUARD
-			ctx.pathfinder:followTarget(target, {
-				recomputeInterval = config.RECOMPUTE_INTERVAL,
-				arrivalDistance = config.ARRIVAL_DISTANCE,
-				visualize = GameConfig.GAME.DEBUG,
-				onTargetLost = function()
-					log:debug("Guard NPC: target lost (callback)")
-				end,
-			})
-		end,
-
-		onUpdate = function(ctx: NPCEntry, dt: number): string?
-			local rootPart = ctx.model.PrimaryPart
-			if not rootPart then
-				return nil
-			end
-
-			-- Throttle re-evaluation
-			ctx.guardReevalTimer = (ctx.guardReevalTimer or 0) + dt
-			if ctx.guardReevalTimer < GameConfig.NPC.GUARD.REEVALUATE_INTERVAL then
-				return nil
-			end
-			ctx.guardReevalTimer = 0
-
-			-- Distance-only check to maintain chase (no LOS flicker at wall edges)
-			local currentTarget = ctx.guardTarget
-			local currentTargetValid = false
-
-			if currentTarget and currentTarget:IsDescendantOf(game) then
-				local targetRoot = currentTarget:FindFirstChild("HumanoidRootPart")
-				if targetRoot then
-					local distance = ((targetRoot :: BasePart).Position - rootPart.Position).Magnitude
-					if distance <= GameConfig.NPC.GUARD.DETECTION_RADIUS then
-						currentTargetValid = true
-					end
-				end
-			end
-
-			if not currentTargetValid then
-				ctx.guardTarget = nil
-				return "Returning"
-			end
-
-			-- Check if a closer player is a better target (distance + LOS to start new chase)
-			local nearest = findNearestPlayer(rootPart.Position)
-			if nearest and nearest ~= currentTarget then
-				local nearestRoot = nearest:FindFirstChild("HumanoidRootPart")
-				if nearestRoot then
-					local dist = ((nearestRoot :: BasePart).Position - rootPart.Position).Magnitude
-					if dist <= GameConfig.NPC.GUARD.DETECTION_RADIUS then
-						if ctx.pathfinder:hasLineOfSight((nearestRoot :: BasePart).Position, { nearest }) then
-							ctx.guardTarget = nearest
-							return "Chasing"
-						end
-					end
-				end
-			end
-
-			return nil
-		end,
-
-		onExit = function(ctx: NPCEntry)
-			ctx.pathfinder:stop()
-			ctx.guardReevalTimer = nil
-		end,
-	},
-
-	Returning = {
-		onEnter = function(ctx: NPCEntry)
-			ctx.guardReachedWaypoint = false
-
-			local rootPart = ctx.model.PrimaryPart
-			if not rootPart then
-				ctx.guardReachedWaypoint = true
-				return
-			end
-
-			-- Find nearest waypoint
-			local waypoints = GameConfig.NPC.GUARD.WAYPOINTS
-			local nearestIndex = 1
-			local nearestDist = math.huge
-			for i, wp in waypoints do
-				local dist = (wp - rootPart.Position).Magnitude
-				if dist < nearestDist then
-					nearestDist = dist
-					nearestIndex = i
-				end
-			end
-
-			ctx.guardLastWaypointIndex = nearestIndex
-			log:debug(`Guard NPC: returning to waypoint {nearestIndex}`)
-
-			ctx.guardPatrolThread = task.spawn(function()
-				ctx.pathfinder._isMoving = true
-				ctx.pathfinder:moveTo(waypoints[nearestIndex])
-				ctx.guardReachedWaypoint = true
-			end)
-		end,
-
-		onUpdate = function(ctx: NPCEntry, dt: number): string?
-			if ctx.guardReachedWaypoint then
-				-- Minimum dwell so "Returning" is observable in debug panel
-				ctx.guardReturnDwell = (ctx.guardReturnDwell or 0) + dt
-				if ctx.guardReturnDwell >= GameConfig.NPC.GUARD.RETURN_DWELL then
-					return "Guarding"
-				end
-				return nil
-			end
-
-			-- Throttle detection during return (can interrupt to chase)
-			ctx.guardDetectTimer = (ctx.guardDetectTimer or 0) + dt
-			if ctx.guardDetectTimer < GameConfig.NPC.GUARD.DETECT_INTERVAL then
-				return nil
-			end
-			ctx.guardDetectTimer = 0
-
-			local rootPart = ctx.model.PrimaryPart
-			if not rootPart then
-				return nil
-			end
-
-			local target = findNearestPlayer(rootPart.Position)
-			if not target then
-				return nil
-			end
-
-			local targetRoot = target:FindFirstChild("HumanoidRootPart")
-			if not targetRoot then
-				return nil
-			end
-
-			local distance = ((targetRoot :: BasePart).Position - rootPart.Position).Magnitude
-			if distance <= GameConfig.NPC.GUARD.DETECTION_RADIUS then
-				if ctx.pathfinder:hasLineOfSight((targetRoot :: BasePart).Position, { target }) then
-					ctx.guardTarget = target
-					return "Chasing"
-				end
-			end
-
-			return nil
-		end,
-
-		onExit = function(ctx: NPCEntry)
-			if ctx.guardPatrolThread then
-				task.cancel(ctx.guardPatrolThread)
-				ctx.guardPatrolThread = nil
-			end
-			ctx.guardDetectTimer = nil
-			ctx.guardReachedWaypoint = nil
-			ctx.guardReturnDwell = nil
-			ctx.pathfinder:stop()
-		end,
-	},
-}
-
--- ═══════════════════════════════════════════════════════════
 -- PUBLIC API
 -- ═══════════════════════════════════════════════════════════
 
@@ -935,7 +307,7 @@ function NPCManager.initialize(): ()
 		patrolEntry.stateLabel = createStateLabel(patrolEntry.model)
 		patrolEntry.stateMachine = NPCStateMachine.new(
 			"Patrolling",
-			PATROL_STATES,
+			PatrolStates,
 			patrolEntry,
 			makeStateLabelUpdater(GameConfig.NPC.PATROL.DISPLAY_NAME, patrolEntry.stateLabel)
 		)
@@ -945,7 +317,7 @@ function NPCManager.initialize(): ()
 		wanderEntry.stateLabel = createStateLabel(wanderEntry.model)
 		wanderEntry.stateMachine = NPCStateMachine.new(
 			"Wandering",
-			WANDER_STATES,
+			WanderStates,
 			wanderEntry,
 			makeStateLabelUpdater(GameConfig.NPC.WANDER.DISPLAY_NAME, wanderEntry.stateLabel)
 		)
@@ -958,10 +330,14 @@ function NPCManager.initialize(): ()
 		end
 		-- Chase starts Idle — transitions to Chasing when a player enters detection radius
 		chaseEntry.stateLabel = createStateLabel(chaseEntry.model)
-		chaseEntry.debugDisc = createDetectionRadiusCircle(chaseEntry.model, GameConfig.NPC.CHASE.DETECTION_RADIUS)
+		chaseEntry.debugDisc = createDetectionRadiusCircle(
+			chaseEntry.model,
+			GameConfig.NPC.CHASE.DETECTION_RADIUS,
+			Color3.fromRGB(239, 68, 68)
+		)
 		chaseEntry.stateMachine = NPCStateMachine.new(
 			"Idle",
-			CHASE_STATES,
+			ChaseStates,
 			chaseEntry,
 			makeStateLabelUpdater(GameConfig.NPC.CHASE.DISPLAY_NAME, chaseEntry.stateLabel)
 		)
@@ -975,14 +351,14 @@ function NPCManager.initialize(): ()
 		end
 		-- Guard starts Guarding — LOS+distance triggers Chasing, then Returning to post
 		guardEntry.stateLabel = createStateLabel(guardEntry.model)
-		local disc = createDetectionRadiusCircle(guardEntry.model, GameConfig.NPC.GUARD.DETECTION_RADIUS)
-		if disc then
-			disc.Color = Color3.fromRGB(255, 139, 0) -- Orange (distinct from Chase red)
-		end
-		guardEntry.debugDisc = disc
+		guardEntry.debugDisc = createDetectionRadiusCircle(
+			guardEntry.model,
+			GameConfig.NPC.GUARD.DETECTION_RADIUS,
+			Color3.fromRGB(255, 139, 0)
+		)
 		guardEntry.stateMachine = NPCStateMachine.new(
 			"Guarding",
-			GUARD_STATES,
+			GuardStates,
 			guardEntry,
 			makeStateLabelUpdater(GameConfig.NPC.GUARD.DISPLAY_NAME, guardEntry.stateLabel)
 		)
@@ -1109,6 +485,32 @@ function NPCManager.setDebugVisualEnabled(npcName: string, visualType: string, e
 				beam.Transparency = NumberSequence.new(if enabled then 0.5 else 1)
 			end
 		end
+	elseif visualType == "chasePath" then
+		-- Toggle chase/guard path dots (the small spheres along computed path)
+		entry.pathfinder:setVisualizeEnabled(enabled)
+	elseif visualType == "nameLabel" then
+		-- Toggle the NPC display name BillboardGui above head
+		local head = entry.model:FindFirstChild("Head")
+		if head then
+			-- Name label is a BillboardGui that is NOT named "StateLabelGui"
+			for _, child in head:GetChildren() do
+				if child:IsA("BillboardGui") and child.Name ~= "StateLabelGui" then
+					child.Enabled = enabled
+				end
+			end
+		end
+	elseif visualType == "waypointNumbers" then
+		-- Toggle just the number BillboardGuis on waypoint markers (not the spheres)
+		if entry.debugFolder then
+			for _, child in entry.debugFolder:GetChildren() do
+				if child:IsA("BasePart") then
+					local billboard = child:FindFirstChildOfClass("BillboardGui")
+					if billboard then
+						billboard.Enabled = enabled
+					end
+				end
+			end
+		end
 	else
 		log:warn(`setDebugVisualEnabled: unknown visualType "{visualType}"`)
 	end
@@ -1140,7 +542,7 @@ function NPCManager.cleanup(): ()
 		log:debug(`Cleaned up {name}`)
 	end
 	table.clear(activeNPCs)
-	cachedObstacleFolder = nil
+	BehaviorHelpers.clearCache()
 	log:info("All NPCs cleaned up")
 end
 

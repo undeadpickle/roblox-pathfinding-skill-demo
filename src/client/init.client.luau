@@ -27,8 +27,6 @@ local success, err = pcall(function()
 
 	local function onCharacterAdded(_character: Model): ()
 		log:debug("Character spawned")
-
-		-- TODO: Character setup
 	end
 
 	-- Connect character events

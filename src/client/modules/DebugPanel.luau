@@ -143,21 +143,48 @@ function DebugPanel.initialize(): ()
 
 	-- Each toggle fires a remote for ALL NPCs with that visual type
 	local toggleDefs = {
-		{ label = "Detection Discs", visualType = "disc", order = 1 },
-		{ label = "State Labels", visualType = "stateLabel", order = 2 },
-		{ label = "Waypoint Markers", visualType = "waypoints", order = 3 },
-		{ label = "Wander Beam", visualType = "wanderBeam", order = 4 },
+		{ label = "Detection Discs", visualType = "disc", order = 2 },
+		{ label = "State Labels", visualType = "stateLabel", order = 3 },
+		{ label = "Chase Path Dots", visualType = "chasePath", order = 4 },
+		{ label = "Waypoint Markers", visualType = "waypoints", order = 5 },
+		{ label = "Waypoint Numbers", visualType = "waypointNumbers", order = 6 },
+		{ label = "Name Labels", visualType = "nameLabel", order = 7 },
+		{ label = "Wander Beam", visualType = "wanderBeam", order = 8 },
 	}
 
+	-- Track update functions so Toggle All can sync them
+	local toggleUpdaters: { (enabled: boolean) -> () } = {}
+
 	for _, def in toggleDefs do
-		local row, _updateFn = DebugPanelUI.createToggleRow(def.label, true, def.order, function(enabled: boolean)
+		local row, updateFn = DebugPanelUI.createToggleRow(def.label, true, def.order, function(enabled: boolean)
 			-- Fire for all NPCs
 			for _, npcInfo in NPC_ORDER do
 				toggleEvent:FireServer(npcInfo.displayName, def.visualType, enabled)
 			end
 		end)
+		table.insert(toggleUpdaters, updateFn)
 		row.Parent = visualSection
 	end
+
+	-- Toggle All: master on/off that syncs all individual toggles
+	local toggleAllRow, _toggleAllUpdate = DebugPanelUI.createToggleRow(
+		"Toggle All",
+		true,
+		1,
+		function(enabled: boolean)
+			-- Sync all individual toggle visuals
+			for _, updater in toggleUpdaters do
+				updater(enabled)
+			end
+			-- Fire remotes for every visual type on every NPC
+			for _, def in toggleDefs do
+				for _, npcInfo in NPC_ORDER do
+					toggleEvent:FireServer(npcInfo.displayName, def.visualType, enabled)
+				end
+			end
+		end
+	)
+	toggleAllRow.Parent = visualSection
 
 	visualSection.Parent = content
 

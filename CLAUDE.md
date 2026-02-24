@@ -59,9 +59,14 @@ NPC pathfinding demo showcasing chase, patrol, wander, and guard behaviors using
 - `Remotes` — Client-server communication helpers
 - `Logger` — Debug logging with [Server]/[Client] prefixes
 - `MapSetup` — Config-driven obstacle geometry spawner (reads `GameConfig.MAP.OBSTACLES`)
-- `NPCPathfinder` — PathfindingService wrapper with moveTo, patrol, followTarget, wander, hasLineOfSight
+- `NPCPathfinder` — PathfindingService wrapper with moveTo, patrol, followTarget, wander, hasLineOfSight, setVisualizeEnabled
 - `NPCStateMachine` — Generic finite state machine (shared, reusable for any system). Optional `onStateChanged` callback (4th param) fires on initial state and every transition.
-- `NPCManager` — Spawns NPCs, wires state machines to pathfinder, manages lifecycle. Exposes `getAllNPCStatus()`, `setDebugVisualEnabled()`, `setDebugStateCallback()` for debug panel.
+- `NPCManager` — Orchestrator: spawns NPCs, wires behavior state maps to pathfinder, manages lifecycle. Exposes `getAllNPCStatus()`, `setDebugVisualEnabled()`, `setDebugStateCallback()` for debug panel. State definitions live in `behaviors/` modules.
+- `behaviors/ChaseStates` — Chase NPC state definitions (Idle ↔ Chasing)
+- `behaviors/PatrolStates` — Patrol NPC state definitions (Patrolling)
+- `behaviors/WanderStates` — Wander NPC state definitions (Wandering)
+- `behaviors/GuardStates` — Guard NPC state definitions (Guarding ↔ Chasing ↔ Returning)
+- `behaviors/BehaviorHelpers` — Shared utilities: findNearestPlayer, getRandomPointInRadius, createWaypointMarkers, evaluateChaseTarget
 - `DebugRemotes` — String constants for debug remote names (shared, single source of truth)
 - `DebugService` — Server-side handler bridging debug panel requests into NPCManager
 - `DebugPanel` — Client-side debug panel logic (toggle, polling, remote calls)
@@ -79,7 +84,8 @@ NPC pathfinding demo showcasing chase, patrol, wander, and guard behaviors using
 - Guard detection: distance + LOS raycast (via `hasLineOfSight`) to initiate chase, distance-only to maintain chase (prevents LOS flicker at wall edges). Returns to nearest waypoint when target lost.
 - `hasLineOfSight(targetPos, excludeModels?)` is public on NPCPathfinder. Raycasts from NPC root to target, excluding the NPC model and optionally additional models (e.g., the target player's character).
 - Debug visuals gated by `GameConfig.GAME.DEBUG`: state labels above heads, detection radius disc (chase=red, guard=orange, anchored + tick-updated), waypoint spheres (chase path, color-coded), patrol waypoint markers (yellow), guard waypoint markers (orange, no lines — random order), wander beam + target marker
-- Debug panel (F8 toggle): live NPC status readout, per-visual toggles (disc, stateLabel, waypoints, wanderBeam), teleport-to-zone buttons. Client polls server every 0.5s + push events for instant state changes.
+- Debug panel (F8 toggle): live NPC status readout, per-visual toggles (disc, stateLabel, chasePath, waypoints, waypointNumbers, nameLabel, wanderBeam) with Toggle All master switch, teleport-to-zone buttons. Client polls server every 0.5s + push events for instant state changes.
+- Chase path dot toggle uses `_visualizeOverride` pattern in NPCPathfinder so debug panel state persists across `followTarget` restarts during state transitions.
 
 ### Map & Obstacles
 - Obstacle geometry defined in `GameConfig.MAP.OBSTACLES` (position, size, color per obstacle)
