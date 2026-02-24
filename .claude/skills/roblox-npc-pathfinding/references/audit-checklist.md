@@ -92,7 +92,30 @@ Use this checklist when reviewing existing pathfinding code. Work through each s
 - [ ] **Unused Humanoid states disabled** — For 30+ NPCs, unnecessary Humanoid states disabled to reduce simulation cost.
   - Severity: SUGGESTION for 30-50 NPCs, WARNING for 50+
 
-## 7. Robustness
+## 7. State Machine & Behavior Architecture
+
+- [ ] **State machine drives behavior** — NPC behavior uses a state machine (`onEnter`/`onUpdate`/`onExit` lifecycle hooks), not boolean flags, nested ifs, or raw `PlayerAdded` connections.
+  - Severity: WARNING (boolean flag spaghetti doesn't scale past 2 behaviors)
+
+- [ ] **Waypoint index 1 skipped** — `GetWaypoints()` returns waypoint 1 as the NPC's current position at navmesh height. Traversal must start from index 2 to avoid stalling on a same-XZ, different-Y waypoint.
+  - Severity: CRITICAL (NPC gets stuck on first waypoint every time)
+
+- [ ] **Freefall state rejection** — `_computePath` checks `Humanoid:GetState() == Freefall` before calling `ComputeAsync`. Mid-air start positions produce invalid paths.
+  - Severity: WARNING (rare but causes teleporting/invalid paths near obstacles)
+
+- [ ] **`_resetMovement()` separated from `stop()`** — Internal state clearing (flags, waypoint index) uses a method that does NOT cancel the movement thread. `stop()` is for external callers. Calling `stop()` from within the movement thread kills that thread mid-execution.
+  - Severity: CRITICAL (thread self-cancellation causes silent failures)
+
+- [ ] **`hasLineOfSight` excludes target model** — When raycasting to a player for detection, the target character must be in `FilterDescendantsInstances`. Otherwise the ray hits the target's own body parts and LOS always returns false.
+  - Severity: CRITICAL (LOS detection completely broken without this)
+
+- [ ] **LOS used to initiate, not maintain** — Chase initiation uses LOS + distance, but chase maintenance uses distance-only. Using LOS for both causes state flicker at wall edges.
+  - Severity: WARNING (cosmetic but disruptive — NPC rapidly switches states)
+
+- [ ] **No `MoveTo(currentPosition)` as stop mechanism** — `MoveTo` to the NPC's own position fires a stale `MoveToFinished(true)` that subsequent `:Wait()` calls catch instantly, causing rapid-fire recomputation loops.
+  - Severity: CRITICAL (causes 77+ path recomputes in seconds)
+
+## 8. Robustness
 
 - [ ] **NPC death handled** — When NPC dies (health = 0), pathfinding stops cleanly. No errors from trying to move a dead NPC.
   - Severity: CRITICAL

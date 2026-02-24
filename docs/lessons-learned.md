@@ -114,3 +114,9 @@
 - **[Architecture]** Don't let behavior defaults overwrite debug panel overrides on state transitions. `followTarget` was called on every new chase and reset `_visualizeEnabled = options.visualize`, clobbering the panel's toggle. Use a `_visualizeOverride` field (nil = use behavior default, boolean = panel override) so the debug toggle persists across state re-entries. Other visual types (discs, labels, markers) didn't have this problem because they're created once and never recreated.
 
 - **[Luau]** Don't use `any` for typed fields when `typeof()` works. Luau's `typeof(Module.new(nil :: any))` captures the full metatable type without needing explicit export types, providing autocomplete and type checking on fields like `pathfinder` and `stateMachine`.
+
+## Session: 2026-02-24 — SimplePath Comparison & Skill Rewrite
+
+- **[Pathfinding]** Don't recompute paths while the humanoid is in `Freefall` state. The NPC's position mid-air is unreliable, causing `ComputeAsync` to use a bad start position and produce erratic paths on landing. Check `self._humanoid:GetState() == Enum.HumanoidStateType.Freefall` at the top of `_computePath` and return the existing waypoints instead. Found by comparing against SimplePath's approach — one of very few things it handled that we didn't.
+
+- **[Docs]** Don't ship skill assets as a single condensed "reference" file that simplifies the production module. It drifts silently as production code evolves — this session found the asset was missing freefall rejection, `_visualizeOverride`, stuck detection, collision group setup, and the full `_resetMovement`/`stop` separation. Ship assets as separate files matching production's module structure (one per module) so diffs between asset and production are meaningful. Extends the earlier "audit skill docs against lessons" rule with a structural fix.

@@ -163,16 +163,22 @@ Humanoid is expensive. For 50+ NPCs, consider:
 
 **Disable unused Humanoid states:**
 ```lua
+-- Safe to disable — NPCs never use these
 humanoid:SetStateEnabled(Enum.HumanoidStateType.Climbing, false)
-humanoid:SetStateEnabled(Enum.HumanoidStateType.FallingDown, false)
 humanoid:SetStateEnabled(Enum.HumanoidStateType.Flying, false)
-humanoid:SetStateEnabled(Enum.HumanoidStateType.Freefall, false)
-humanoid:SetStateEnabled(Enum.HumanoidStateType.GettingUp, false)
-humanoid:SetStateEnabled(Enum.HumanoidStateType.Landed, false)
 humanoid:SetStateEnabled(Enum.HumanoidStateType.Ragdoll, false)
 humanoid:SetStateEnabled(Enum.HumanoidStateType.Seated, false)
 humanoid:SetStateEnabled(Enum.HumanoidStateType.StrafingNoPhysics, false)
 humanoid:SetStateEnabled(Enum.HumanoidStateType.Swimming, false)
+
+-- WARNING: Do NOT disable these when obstacles exist in the environment.
+-- FallingDown, GettingUp, Freefall, and Landed form the physics recovery cycle.
+-- Without them, an NPC knocked over by an obstacle stays down permanently.
+-- Only disable on flat geometry with zero collision risk.
+-- humanoid:SetStateEnabled(Enum.HumanoidStateType.FallingDown, false)
+-- humanoid:SetStateEnabled(Enum.HumanoidStateType.Freefall, false)
+-- humanoid:SetStateEnabled(Enum.HumanoidStateType.GettingUp, false)
+-- humanoid:SetStateEnabled(Enum.HumanoidStateType.Landed, false)
 ```
 
 **Disable collision on NPC parts that don't need it:**

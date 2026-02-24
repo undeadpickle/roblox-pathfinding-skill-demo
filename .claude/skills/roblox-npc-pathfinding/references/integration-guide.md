@@ -45,19 +45,28 @@ These changes apply regardless of game architecture:
 
 ## Phase 3: Module Placement
 
-Place `npc-pathfinder-module.luau` based on their existing architecture. **Default to server-side locations** — NPC AI logic should not be in ReplicatedStorage where clients can decompile it and learn behavior patterns (aggro ranges, timing, decision logic).
+Place the three core modules based on the project's existing architecture. **Default to server-side locations** — NPC AI logic should not be in ReplicatedStorage where clients can decompile it and learn behavior patterns (aggro ranges, timing, decision logic).
 
-| Their Pattern | Place Module In | Require Pattern |
-|--------------|-----------------|-----------------|
-| Modules in ServerScriptService | `ServerScriptService.Modules` | `require(ServerScriptService.Modules.NPCPathfinder)` |
-| Modules in ServerStorage | `ServerStorage.Modules` | `require(ServerStorage.Modules.NPCPathfinder)` |
-| Modules in ReplicatedStorage | Move NPC module to `ServerScriptService.Modules` instead | `require(ServerScriptService.Modules.NPCPathfinder)` |
-| No module pattern (scripts only) | `ServerScriptService.NPCPathfinder` | `require(script.Parent.NPCPathfinder)` or direct path |
-| Framework (Knit, etc.) | Follow framework conventions for services (server-side) | Framework-specific require |
+### Module placement table
 
-> **Why not ReplicatedStorage?** Everything in ReplicatedStorage is sent to every client. Exploiters can decompile ModuleScripts there. While they can't force the server NPC to do anything, they CAN read your aggro radius, recompute intervals, stuck detection thresholds, and decision logic — then exploit those patterns (kiting NPCs, abusing blind spots, timing invulnerability windows). Server-side AI logic should stay opaque.
+| Module | Purpose | Placement |
+|--------|---------|-----------|
+| `NPCPathfinder` | PathfindingService wrapper (moveTo, patrol, followTarget, etc.) | Server modules folder |
+| `NPCStateMachine` | Generic finite state machine (no server deps) | **Shared modules folder** (reusable for any system) |
+| `BehaviorHelpers` | Shared utilities (findNearestPlayer, getRandomPointInRadius, etc.) | Server modules folder (uses Players service) |
+| Behavior state modules (e.g., `ChaseStates`, `GuardStates`) | State definitions per NPC type | Server modules folder (alongside NPCPathfinder) |
 
-Rename the module file to match their naming convention (PascalCase, camelCase, etc.).
+| Their Pattern | Server Modules | Shared Modules | Require Pattern |
+|--------------|----------------|-----------------|-----------------|
+| Modules in ServerScriptService | `ServerScriptService.Modules` | `ReplicatedStorage.Shared` | `require(SSS.Modules.NPCPathfinder)` |
+| Modules in ServerStorage | `ServerStorage.Modules` | `ReplicatedStorage.Shared` | `require(SS.Modules.NPCPathfinder)` |
+| Modules in ReplicatedStorage | Move NPC modules to `ServerScriptService.Modules` | Keep `NPCStateMachine` in `ReplicatedStorage` | Mixed paths |
+| No module pattern (scripts only) | `ServerScriptService.NPC` | `ReplicatedStorage.NPCStateMachine` | Direct paths |
+| Framework (Knit, etc.) | Follow framework conventions for services | Follow framework shared conventions | Framework-specific require |
+
+> **Why not ReplicatedStorage for everything?** Everything in ReplicatedStorage is sent to every client. Exploiters can decompile ModuleScripts there. While they can't force the server NPC to do anything, they CAN read your aggro radius, recompute intervals, stuck detection thresholds, and decision logic — then exploit those patterns (kiting NPCs, abusing blind spots, timing invulnerability windows). Only `NPCStateMachine` belongs in shared — it's a generic utility with no game-specific logic.
+
+Rename module files to match the project's naming convention (PascalCase, camelCase, etc.).
 
 ## Phase 4: Connect to Existing NPC System
 
@@ -112,22 +121,67 @@ end
 
 ### If they have a state machine or behavior system:
 
-The pathfinder module provides movement primitives. Wire them into the existing state system:
+The pathfinder module provides movement primitives. Wire them into the existing state system using `NPCStateMachine`:
 
 ```lua
--- Example: existing state machine integration
-function NPCStateMachine:enterState(state)
-    if state == "Chase" then
-        self.pathfinder:followTarget(self.target, {
-            recomputeInterval = 0.5,
-            arrivalDistance = 5,
-        })
-    elseif state == "Patrol" then
-        self.pathfinder:patrol(self.patrolPoints)
-    elseif state == "Idle" then
-        self.pathfinder:stop()
-    end
+-- Behavior state definitions (e.g., behaviors/ChaseStates.luau)
+local BehaviorHelpers = require(path.to.BehaviorHelpers)
+
+return function(config)
+    return {
+        Idle = {
+            onUpdate = function(ctx, dt)
+                local nearest = BehaviorHelpers.findNearestPlayer(ctx.model.PrimaryPart.Position)
+                if nearest then
+                    local root = nearest:FindFirstChild("HumanoidRootPart")
+                    if root then
+                        local dist = ((root :: BasePart).Position - ctx.model.PrimaryPart.Position).Magnitude
+                        if dist <= config.DETECTION_RADIUS then
+                            ctx.chaseTarget = nearest
+                            return "Chasing"
+                        end
+                    end
+                end
+                return nil
+            end,
+        },
+        Chasing = {
+            onEnter = function(ctx)
+                local target = ctx.chaseTarget
+                if target then
+                    ctx.pathfinder:followTarget(target, {
+                        recomputeInterval = config.RECOMPUTE_INTERVAL or 0.5,
+                        arrivalDistance = config.ARRIVAL_DISTANCE or 5,
+                    })
+                end
+            end,
+            onUpdate = function(ctx, dt)
+                return BehaviorHelpers.evaluateChaseTarget(
+                    ctx, config, "chaseTarget", "Idle"
+                )
+            end,
+            onExit = function(ctx)
+                ctx.pathfinder:stop()
+            end,
+        },
+    }
 end
+```
+
+Then wire it up in the manager:
+
+```lua
+local NPCStateMachine = require(path.to.NPCStateMachine)
+local ChaseStates = require(path.to.ChaseStates)
+
+local states = ChaseStates({ DETECTION_RADIUS = 20, WALK_SPEED = 16 })
+local context = { model = npcModel, pathfinder = pathfinder }
+local sm = NPCStateMachine.new("Idle", states, context)
+
+-- Drive from a central tick loop (NOT per-NPC RunService connections):
+RunService.PostSimulation:Connect(function(dt)
+    sm:update(dt)
+end)
 ```
 
 ### If they have NO existing NPC management:

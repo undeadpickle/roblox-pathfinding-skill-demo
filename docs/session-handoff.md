@@ -1,36 +1,62 @@
 # Session Handoff
 
-> Updated: 2026-02-24 (Session 13)
-> Focus: Debug panel feature prioritization, perf strip, enhanced teleport
+> Updated: 2026-02-24 (Session 14)
+> Focus: SimplePath comparison, NPC pathfinding skill v2.0 rewrite
 
 ---
 
 ## What Got Done
 
-### Feature Prioritization
+### SimplePath Comparison
 
-- Evaluated 20 debug panel feature ideas against the project (solo NPC pathfinding prototype)
-- Cut 12 features that don't apply (no production, no noise system, no multiplayer, no custom camera, no UI yet, etc.)
-- Produced ranked top 10 with implementation plan in 5 batches — saved to `.claude/plans/harmonic-sauteeing-torvalds.md`
+- Analyzed SimplePath (popular Roblox community pathfinding module) against our NPCPathfinder
+- Evaluated 9 features — our implementation was superior in 7, equivalent in 1
+- Only 1 thing worth stealing: **freefall state rejection** (~3 lines in `_computePath`)
+- Implemented the freefall guard in production `NPCPathfinder.luau`:
+  ```lua
+  if self._humanoid:GetState() == Enum.HumanoidStateType.Freefall then
+      return #self._waypoints > 0
+  end
+  ```
 
-### Batch 1: Perf Strip + Enhanced Teleport
+### Skill Rewrite: roblox-npc-pathfinding v2.0
 
-- **Performance strip** (always visible, top-left): FPS, frame time (ms), instance count. Color-coded green/yellow/red by frame time thresholds (16ms/33ms). Instance count polls every 3s. Independent of F8 panel toggle.
-- **Enhanced teleport** — 3 modes in the Teleport section:
-  - "To Spawn Zone" — existing behavior (unchanged)
-  - "To NPC (Current Pos)" — teleports player near NPC's live position
-  - "Summon NPC to Me" — stops NPC pathfinder, teleports NPC to player's position
-- **New NPCManager API**: `getNPCPosition(displayName)`, `teleportNPC(displayName, position)` — `teleportNPC` calls `pathfinder:stop()` before `PivotTo` so movement doesn't fight the teleport.
-- **New DebugPanelUI factories**: `createPerfStrip()`, `createSubLabel()` — sub-labels used to organize teleport section into labeled groups.
+Full rewrite of `.claude/skills/roblox-npc-pathfinding/` to match production code and be reusable across any Roblox project.
+
+**Assets (3 new, 1 deleted):**
+- `assets/npc-pathfinder.luau` — Production-matching, Logger→warn(), all 7 bugs from old asset fixed
+- `assets/npc-state-machine.luau` — Ported from production, Logger→warn()
+- `assets/behavior-helpers.luau` — Ported from production
+- `assets/npc-pathfinder-module.luau` — Deleted (replaced by npc-pathfinder.luau)
+
+**SKILL.md** — Full rewrite with interactive wizard flow. User picks NPC type (Chase/Patrol/Wander/Guard/Custom), answers follow-up questions, gets generated code. Flee and Formation patterns cut (hypothetical, never built).
+
+**Reference files updated:**
+- `behavior-patterns.md` — Full rewrite: Controller classes → state machine patterns
+- `performance-patterns.md` — Fixed disabled humanoid states bug
+- `common-pitfalls.md` — Added 4 entries (freefall, LOS exclusion, LOS flicker, visualize override)
+- `audit-checklist.md` — Added Section 7 (State Machine & Behavior Architecture, 7 items)
+- `integration-guide.md` — Updated for 3-module architecture + state machine wiring example
 
 ## Files Changed
 
-- `src/client/modules/DebugPanel.luau` — Perf strip wiring (RenderStepped + instance count timer), 3 teleport sub-sections
-- `src/client/modules/DebugPanelUI.luau` — `createPerfStrip()`, `createSubLabel()` factory functions
-- `src/server/modules/DebugService.luau` — `TELEPORT_TO_NPC_CURRENT`, `TELEPORT_NPC_TO_PLAYER` handlers
-- `src/server/modules/NPCManager.luau` — `getNPCPosition()`, `teleportNPC()` public methods
-- `src/shared/DebugRemotes.luau` — 2 new remote constants
-- `CLAUDE.md` — Updated NPCManager methods list, debug panel description, added perf strip docs
+### Production Code
+- `src/server/modules/NPCPathfinder.luau` — Added freefall state rejection in `_computePath`
+
+### Skill Files (all under `.claude/skills/roblox-npc-pathfinding/`)
+- `SKILL.md` — Full rewrite (v2.0.0)
+- `assets/npc-pathfinder.luau` — New (replaces npc-pathfinder-module.luau)
+- `assets/npc-state-machine.luau` — New
+- `assets/behavior-helpers.luau` — New
+- `assets/npc-pathfinder-module.luau` — Deleted
+- `references/behavior-patterns.md` — Full rewrite
+- `references/performance-patterns.md` — Bug fix
+- `references/common-pitfalls.md` — 4 new entries
+- `references/audit-checklist.md` — New section 7
+- `references/integration-guide.md` — Updated module placement + wiring example
+
+### Docs
+- `docs/lessons-learned.md` — 2 new entries (freefall rejection, skill asset structure)
 
 ## What's Next
 
@@ -57,11 +83,10 @@ None.
 - **Force state transitions (Batch 2)**: `NPCStateMachine` has `transitionTo(stateName)` already. Gotcha: forcing Guard into Chasing without a target — `onEnter` expects `ctx.guardTarget`. Need to auto-assign nearest player or warn.
 - **Respawn NPC (Batch 2)**: Per-NPC cleanup path exists in `NPCManager.cleanup()`. Need to extract into reusable `spawnAndConfigureNPC(behaviorType)` — the monolithic `initialize()` does all 4 inline currently.
 - **Config sliders (Batch 3)**: `GameConfig` is frozen (`table.freeze`). Sliders must set values on runtime objects directly. Detection radius needs a `ctx.detectionRadiusOverride` field (same pattern as `_wanderBeamVisible`).
-- **Perf strip**: Lives in its own ScreenGui (`PerfStrip`, DisplayOrder 101), always enabled. Labels updated via RenderStepped (FPS/frame time) and spawned task (instance count, 3s).
-- **Teleport NPC to player**: Calls `pathfinder:stop()` before `PivotTo`. State machine picks up from new position naturally since states read `rootPart.Position` each tick.
+- **Skill v2.0 is complete** — All assets match production code, all reference docs updated. Plan file at `.claude/plans/dynamic-spinning-nest.md` documents the full rewrite scope.
 
 ---
 
 ## CLAUDE.md Suggestions
 
-None — updated during this session.
+None — still current.

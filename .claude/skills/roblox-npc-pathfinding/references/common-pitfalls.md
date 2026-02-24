@@ -148,6 +148,51 @@ Before diagnosing any pathfinding issue, enable these visualizations in Roblox S
    end
    ```
 
+### ComputeAsync called while NPC is in freefall
+
+**Causes:**
+1. **Path computed while NPC is airborne** — If the NPC is mid-air (freefall after being knocked off a ledge, bumped by physics, etc.), `ComputeAsync` uses the airborne position as the start. The resulting path is invalid — it starts from a position the NPC won't be at when it lands.
+   - **Fix:** Guard `_computePath` with a freefall state check at the top. Skip recomputation and keep the existing waypoints until the NPC lands:
+   ```lua
+   if self._humanoid:GetState() == Enum.HumanoidStateType.Freefall then
+       return #self._waypoints > 0
+   end
+   ```
+
+### hasLineOfSight always returns false
+
+**Causes:**
+1. **Raycast hits the target's own body** — When raycasting from NPC root to a player's HumanoidRootPart position, the ray intersects the player's legs, torso, or other body parts before reaching the target point. The raycast reports a "hit" (obstacle found), so LOS returns false even with a clear sightline.
+   - **Fix:** Pass the target character model in `FilterDescendantsInstances` alongside the NPC model:
+   ```lua
+   local rayParams = RaycastParams.new()
+   rayParams.FilterType = Enum.RaycastFilterType.Exclude
+   rayParams.FilterDescendantsInstances = {self._model, targetCharacterModel}
+   ```
+   The `hasLineOfSight(targetPos, excludeModels?)` method in the asset module accepts an optional `excludeModels` array for this purpose.
+
+### Guard NPC flickers between chase and return states at wall edges
+
+**Causes:**
+1. **Using LOS to maintain chase, not just to initiate it** — When a player peeks around a wall corner, LOS alternates true/false frame-to-frame as the player model partially occludes. If the Chasing → Returning transition checks LOS, the NPC rapidly switches states (chase → return → chase → return).
+   - **Fix:** Use LOS + distance to _initiate_ a chase (enter Chasing state), but use distance-only to _maintain_ it (stay in Chasing / transition to Returning). The player must move out of the detection radius to break the chase, not just duck behind a wall.
+
+### Debug visual toggles reset when NPC re-enters a state
+
+**Causes:**
+1. **Behavior state `onEnter` overwrites debug visual flag** — If `followTarget` is called on every Chasing `onEnter` and it resets `_visualizeEnabled = options.visualize`, the debug panel's toggle gets clobbered. The panel set `_visualizeEnabled = true`, but the next state transition sets it back to `false`.
+   - **Fix:** Use a `_visualizeOverride` pattern. `nil` = use behavior default, `true`/`false` = debug panel override. Check `_visualizeOverride` first, fall back to the behavior option:
+   ```lua
+   function NPCPathfinder:setVisualizeEnabled(enabled: boolean)
+       self._visualizeOverride = enabled
+   end
+
+   -- Inside followTarget / movement methods:
+   local shouldVisualize = if self._visualizeOverride ~= nil
+       then self._visualizeOverride
+       else (options.visualize or false)
+   ```
+
 ## Performance Debugging
 
 ### Detecting Pathfinding Bottlenecks
