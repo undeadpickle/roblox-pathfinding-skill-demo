@@ -48,6 +48,10 @@ local success, err = pcall(function()
 		local NPCManager = require(script.modules.NPCManager)
 		NPCManager.initialize()
 
+		-- Initialize debug panel server-side handlers
+		local DebugService = require(script.modules.DebugService)
+		DebugService.initialize()
+
 		-- Clean up NPC threads and instances on server shutdown
 		game:BindToClose(function()
 			NPCManager.cleanup()

@@ -90,3 +90,15 @@
 - **[Architecture]** Don't require LOS to _maintain_ a chase — only require it to _initiate_ a chase. Using LOS for Chasing→Returning transitions causes flicker at wall edges where the player model partially peeks out frame-to-frame. Use distance-only for disengage, LOS+distance for engage.
 
 - **[Architecture]** Don't add random waypoint selection to a generic patrol method. Use the existing `moveTo` in a spawned thread loop with random index selection — same pattern as the Wander NPC. Keeps the pathfinder module simple and behavior logic in the state machine where it belongs.
+
+## Session: 2026-02-23 — Debug Panel MVP
+
+- **[Roblox]** Don't bind debug panel toggle to F9. F9 opens the Roblox Developer Console in Studio play mode. Use F8 or another unoccupied key.
+
+- **[Architecture]** Don't use `Remotes.onInvoke` with a validator for RemoteFunctions that take no client arguments. The validator pattern expects data to validate — use `Remotes.getFunction().OnServerInvoke` directly when the client sends nothing.
+
+- **[Architecture]** Don't assume a single `onStateChanged` callback can serve both the in-world state label and external listeners. Modify the callback factory (`makeStateLabelUpdater`) to accept and chain an additional callback rather than replacing it.
+
+- **[Roblox]** Don't assume wander beam/marker toggle state persists across state cycles. Wander's `onEnter` recreates visuals each cycle, ignoring the debug toggle. Store a `_wanderBeamVisible` flag on the NPC entry and check it before creating visuals.
+
+- **[UX]** Don't let NPC states transition faster than the UI can display them. Guard's Returning state completed in 1-2 frames when near a waypoint, making it invisible in the debug panel. Add a minimum dwell time (`RETURN_DWELL`) so transient states are observable.

@@ -21,8 +21,8 @@ local success, err = pcall(function()
 	local function initialize(): ()
 		log:info("Initializing...")
 
-		-- TODO: Initialize client systems
-		-- Example: require(script.modules.InputHandler).init()
+		local DebugPanel = require(script.modules.DebugPanel)
+		DebugPanel.initialize()
 	end
 
 	local function onCharacterAdded(_character: Model): ()

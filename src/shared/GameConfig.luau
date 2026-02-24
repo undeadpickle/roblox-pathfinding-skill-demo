@@ -221,6 +221,7 @@ GameConfig.NPC = table.freeze({
 		REEVALUATE_INTERVAL = 1,
 		DETECT_INTERVAL = 0.2,
 		PATROL_PAUSE = 1.5,
+		RETURN_DWELL = 0.8,
 		WAYPOINTS = table.freeze({
 			Vector3.new(10, 5, 25),
 			Vector3.new(15, 5, 45),

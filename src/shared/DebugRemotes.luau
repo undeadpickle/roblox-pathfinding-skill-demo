@@ -1,0 +1,21 @@
+--!strict
+--[[
+	DebugRemotes: String constants for debug panel remote names.
+
+	Single source of truth — both client and server require this module
+	so remote names stay in sync without magic strings.
+]]
+
+local DebugRemotes = {}
+
+-- RemoteFunctions (request/response)
+DebugRemotes.GET_NPC_STATUS = "Debug_GetNPCStatus"
+
+-- RemoteEvents (client → server commands)
+DebugRemotes.TOGGLE_VISUAL = "Debug_ToggleVisual"
+DebugRemotes.TELEPORT_TO_NPC = "Debug_TeleportToNPC"
+
+-- RemoteEvents (server → client pushes)
+DebugRemotes.NPC_STATE_CHANGED = "Debug_NPCStateChanged"
+
+return DebugRemotes

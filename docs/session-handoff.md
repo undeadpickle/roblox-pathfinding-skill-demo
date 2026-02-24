@@ -1,38 +1,43 @@
 # Session Handoff
 
-> Updated: 2026-02-23 (Session 10)
-> Focus: Guard NPC — patrol + chase hybrid with LOS detection and return-to-post
+> Updated: 2026-02-23 (Session 11)
+> Focus: Debug Panel MVP — live NPC status, visual toggles, teleport, state change push
 
 ---
 
 ## What Got Done
 
-- **Guard NPC (4th NPC type)**: 3-state machine (Guarding ↔ Chasing ↔ Returning) combining random patrol with LOS-triggered chase. Spawns at (0, 5, 30) — north quadrant, away from other NPCs.
-- **Random patrol**: Visits 5 waypoints in pentagon layout randomly (excludes last-visited to prevent back-to-back repeats). Uses `moveTo` in a spawned thread loop — same pattern as Wander NPC.
-- **LOS detection**: Distance + raycast to initiate chase. `hasLineOfSight` exposed as public on NPCPathfinder with optional `excludeModels` parameter.
-- **LOS raycast bug fix**: Initial implementation always returned false because the raycast hit the target player's body parts. Fixed by passing the player's character model in `excludeModels`.
-- **Chase/disengage asymmetry**: LOS+distance required to START chasing, distance-only to MAINTAIN chase. Prevents LOS flicker at wall edges.
-- **Return-to-post**: When target lost, Guard finds nearest waypoint, walks to it, then resumes random patrol. Uses `guardReachedWaypoint` flag (initialized false in onEnter) to signal completion.
-- **Guard obstacles**: 2 wall obstacles flanking patrol zone center create LOS-breaking corridors for meaningful LOS gameplay.
-- **Debug visuals**: Orange detection disc (18-stud radius), orange numbered waypoint markers (no connecting lines — random order), state labels (Guarding=orange, Chasing=red, Returning=cyan).
-- **Throttled detection**: Guard's `onUpdate` detection check throttled at 0.2s (`DETECT_INTERVAL`) to avoid raycasting every frame.
-- **Lessons learned**: 3 new rules (LOS raycast target exclusion, chase/disengage asymmetry, behavior logic in state machine not pathfinder).
-- **CLAUDE.md updated**: Architecture sections updated for 4th NPC, Guard-specific docs, LOS gotcha.
+- **Debug Panel MVP**: Full client-side debug panel with 3 sections: Visual Toggles, NPC Status, Teleport. Toggle with F8 key. Raw Roblox UI (no framework).
+- **4 new files**: `DebugRemotes.luau` (shared remote name constants), `DebugService.luau` (server remote handlers), `DebugPanelUI.luau` (UI factories), `DebugPanel.luau` (client logic).
+- **NPCManager debug API**: Added `getAllNPCStatus(playerPos)`, `setDebugVisualEnabled(npcName, visualType, enabled)`, `setDebugStateCallback(callback)`. Status returns state, position, distance, LOS, isMoving, walkSpeed, detectionRadius, behaviorType per NPC.
+- **Hybrid polling + push**: Client polls server every 0.5s for full status data. State changes pushed instantly via `NPC_STATE_CHANGED` RemoteEvent for immediate label updates.
+- **Per-visual toggles**: 4 toggle types — detection discs (transparency), state labels (BillboardGui.Enabled), waypoint markers (folder children), wander beam (flag + instances). Each toggle fires for all NPCs.
+- **Teleport buttons**: 2x2 grid teleporting player to each NPC's spawn zone with 5-stud offset.
+- **Wander beam toggle persistence**: Added `_wanderBeamVisible` flag to NPCEntry so beam/marker toggle state survives state cycle recreation.
+- **State change callback chaining**: Modified `makeStateLabelUpdater` to accept `npcName` param and chain a debug callback alongside the in-world label updater.
+- **Guard Returning dwell time**: Added `RETURN_DWELL = 0.8` config so Returning state is observable in the debug panel (was completing in 1-2 frames).
+- **F9→F8 key change**: F9 conflicts with Roblox Developer Console in Studio play mode. Changed to F8.
+- **Pre-mortem caught 3 issues**: Single callback blocker, wander beam persistence risk, RemoteFunction validator mismatch.
 
 ## Files Changed
 
-- `src/server/modules/NPCManager.luau` — Guard NPCEntry fields, GUARD_STATES (3 states), createGuardWaypointMarkers helper, Guard spawn wiring, orange detection disc
-- `src/server/modules/NPCPathfinder.luau` — Renamed `_hasLineOfSight` to public `hasLineOfSight`, added optional `excludeModels` parameter
-- `src/shared/GameConfig.luau` — Guard config block (spawn pos, speeds, waypoints, detection), 2 guard wall obstacles, state label colors (Guarding, Returning)
-- `docs/lessons-learned.md` — 3 new rules
-- `CLAUDE.md` — Architecture updates for Guard NPC, LOS gotcha
+- `src/shared/DebugRemotes.luau` — **NEW** — Remote name string constants
+- `src/server/modules/DebugService.luau` — **NEW** — Server remote handlers (status, toggle, teleport, state push)
+- `src/client/modules/DebugPanelUI.luau` — **NEW** — UI factory functions (panel, sections, toggles, status rows, buttons, teleport grid)
+- `src/client/modules/DebugPanel.luau` — **NEW** — Client panel logic (polling, toggles, teleport, F8 key binding)
+- `src/server/modules/NPCManager.luau` — Added debug API methods, wander beam flag, state callback chaining, Guard return dwell
+- `src/shared/GameConfig.luau` — Added `GUARD.RETURN_DWELL = 0.8`
+- `src/client/init.client.luau` — Wired DebugPanel.initialize()
+- `src/server/init.server.luau` — Wired DebugService.initialize() after NPCManager
+- `docs/lessons-learned.md` — 5 new rules (F9 conflict, onInvoke validator, callback chaining, beam persistence, dwell time)
+- `CLAUDE.md` — Updated overview, key modules, debug panel architecture notes
 
 ## What's Next
 
-1. **Playtest verification**: Stairs pathfinding, NPC orientation during chase, wander beam rendering (carried over from last session)
-2. **More elevation variety**: Ramps, platforms, multi-level terrain to test vertical pathfinding
-3. **Guard tuning**: Adjust WALK_SPEED, DETECTION_RADIUS, waypoint positions based on playtest feel
-4. **Phase 1 core loop**: Basic UI showing game state, one complete player flow
+1. **Debug panel follow-up**: Force state transitions, respawn individual NPCs, tuning sliders (walk speed, detection radius, patrol pause)
+2. **Playtest verification**: Stairs pathfinding, NPC orientation during chase, wander beam rendering
+3. **More elevation variety**: Ramps, platforms, multi-level terrain
+4. **Phase 1 core loop**: Player-facing UI (Fusion candidate), one complete player flow
 
 ## Blockers
 
@@ -44,28 +49,31 @@ None.
 
 ### What Worked
 
-- **Pre-mortem caught real bugs**: The pre-mortem identified the LOS flicker issue (Chasing→Returning using LOS would cause flicker at wall edges) and the `guardReachedWaypoint` race condition — both were addressed before they became runtime bugs.
-- **Reusing existing patterns**: Guard random patrol reuses the Wander NPC's thread+moveTo loop. Guard chase reuses `followTarget` unchanged. Guard detection disc reuses `createDetectionRadiusCircle` with a post-creation color override. Zero new methods needed on NPCPathfinder beyond exposing `hasLineOfSight`.
-- **State machine scales well**: Adding a 3-state NPC required zero changes to NPCStateMachine. The generic state machine + PostSimulation tick pattern handles 4 NPCs with different complexities cleanly.
+- **Pre-mortem prevented 3 bugs**: The `onStateChanged` single-callback blocker (would have overwritten in-world label updater), wander beam toggle not persisting across state cycles (would silently reset on each wander loop), and `Remotes.onInvoke` validator mismatch (no client data to validate).
+- **Reusing GameConfig patterns**: `UI.COLORS`, `UI.FONTS`, `STATE_LABEL.COLORS` — all existed but were unused. Debug panel gave them consumers without adding new config.
+- **`isMoving()` found its purpose**: NPCPathfinder's `isMoving()` was flagged as unused in cleanup. Debug panel status readout now uses it.
+- **Clean client-server separation**: Server is source of truth. Client is a dumb terminal — sends commands, displays data, never touches NPC state directly.
 
 ### What Broke
 
-- **LOS raycast hitting player body**: The `hasLineOfSight` method excluded only the NPC model from the raycast. The ray to the player's HumanoidRootPart hit the player's own legs/torso first, making LOS always false. Required adding `excludeModels` parameter.
-- **State label appeared non-functional on first test**: Was actually a stale Rojo sync — the label worked on the next playtest. Logs confirmed transitions were firing correctly the whole time.
+- **F9 key conflict**: F9 opens Roblox Developer Console in Studio play mode. Was predicted in plan gotchas, confirmed by user screenshot. Switched to F8.
+- **Guard Returning state invisible**: Returning completed in 1-2 frames when guard was near a waypoint. `moveTo` resolved nearly instantly, and the push event was overwritten by the next state. Fixed with `RETURN_DWELL = 0.8s` minimum.
 
 ### Wrong Assumptions
 
-- Assumed `hasLineOfSight` would work for player detection out of the box. The method was designed for pursuit optimization (NPC→point), not NPC→player-model detection. The target model's own collision geometry wasn't considered.
+- Assumed F9 was safe despite noting the potential conflict in the plan. Should have defaulted to F8 from the start.
+- Assumed instant state transitions would be observable in a 0.5s polling UI. Even with push events, transitions under ~2 frames are effectively invisible in the panel.
 
 ---
 
 ## Key Architecture Notes for Next Session
 
-- **Guard NPC has 3 states**: Guarding (random patrol thread), Chasing (followTarget), Returning (moveTo nearest waypoint). Transitions: Guarding→Chasing (LOS+distance), Chasing→Returning (distance-only), Returning→Guarding (reached waypoint), Returning→Chasing (LOS+distance interrupt).
-- **`hasLineOfSight` is now public** with optional `excludeModels: { Model }?` parameter. Internal callers in `moveTo` and `followTarget` don't pass it (backward-compatible). Guard detection passes `{ target }` to exclude the player model.
-- **Guard detection is throttled**: `DETECT_INTERVAL = 0.2s` in both Guarding and Returning states. Chase re-evaluation uses `REEVALUATE_INTERVAL = 1s`.
-- **Guard patrol uses `moveTo` loop, not `patrol()`**: Random waypoint selection doesn't fit the sequential `patrol()` API. The thread pattern matches Wander NPC.
-- **Chase config values**: Chase NPC: WALK_SPEED=8, DETECTION_RADIUS=15. Guard NPC: WALK_SPEED=10, DETECTION_RADIUS=18.
+- **Debug panel toggle**: F8 key. Panel starts hidden (`ScreenGui.Enabled = false`). Polling starts/stops with panel visibility.
+- **Remote architecture**: `DebugRemotes.luau` holds string constants. `Remotes.getEvent()`/`getFunction()` used for all communication. No custom remote creation — reuses existing Remotes module.
+- **Visual toggle types**: `"disc"` (transparency), `"stateLabel"` (BillboardGui.Enabled), `"waypoints"` (folder children toggle), `"wanderBeam"` (flag + instance toggle). Applied per-NPC from server.
+- **State push callback**: `NPCManager.setDebugStateCallback()` stores a module-level callback. `makeStateLabelUpdater` chains it with the in-world label updater. No changes to NPCStateMachine needed.
+- **Guard dwell**: `RETURN_DWELL = 0.8` in GameConfig. Returning `onUpdate` accumulates `guardReturnDwell` timer after waypoint reached before transitioning to Guarding.
+- **Follow-up scope**: Force state transitions (`stateMachine:transitionTo()`), respawn NPCs (extract spawn logic), tuning sliders (`_override` fields on NPCEntry).
 
 ---
 

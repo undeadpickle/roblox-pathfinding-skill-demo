@@ -46,6 +46,8 @@ type NPCEntry = {
 	wanderThread: thread?,
 	wanderTargetMarker: Part?,
 	wanderNpcAttachment: Attachment?,
+	-- Wander debug visual toggle (pre-mortem fix: onEnter recreates each cycle)
+	_wanderBeamVisible: boolean?,
 	-- Guard state fields (populated by state hooks)
 	guardPatrolThread: thread?,
 	guardTarget: Model?,
@@ -57,6 +59,7 @@ type NPCEntry = {
 
 local activeNPCs: { [string]: NPCEntry } = {}
 local moduleConnections: { RBXScriptConnection } = {}
+local debugStateCallback: ((npcName: string, newState: string, previousState: string?) -> ())? = nil
 
 -- ═══════════════════════════════════════════════════════════
 -- NPC CREATION
@@ -184,7 +187,10 @@ local function createStateLabel(model: Model): TextLabel?
 	return label
 end
 
-local function makeStateLabelUpdater(stateLabel: TextLabel?): ((newState: string, previousState: string?) -> ())?
+local function makeStateLabelUpdater(
+	npcName: string,
+	stateLabel: TextLabel?
+): ((newState: string, previousState: string?) -> ())?
 	if not stateLabel then
 		return nil
 	end
@@ -194,6 +200,9 @@ local function makeStateLabelUpdater(stateLabel: TextLabel?): ((newState: string
 		stateLabel.Text = newState
 		stateLabel.TextColor3 = colors[newState] or defaultColor
 		log:debug(`State changed: {_previousState or "init"} -> {newState}`)
+		if debugStateCallback then
+			debugStateCallback(npcName, newState, _previousState)
+		end
 	end
 end
 
@@ -586,6 +595,7 @@ local WANDER_STATES: NPCStateMachine.StateMap = {
 
 			-- Debug: beam from NPC to current wander target + marker sphere
 			local targetMarker: Part? = nil
+			local beamHidden = ctx._wanderBeamVisible == false -- respect debug panel toggle
 			if GameConfig.GAME.DEBUG then
 				local rootPart = ctx.model.PrimaryPart
 				if rootPart then
@@ -606,7 +616,7 @@ local WANDER_STATES: NPCStateMachine.StateMap = {
 					targetMarker.CastShadow = false
 					targetMarker.Material = Enum.Material.Neon
 					targetMarker.Color = Color3.fromRGB(34, 197, 94) -- Green (Wandering state color)
-					targetMarker.Transparency = 0.3
+					targetMarker.Transparency = if beamHidden then 1 else 0.3
 					targetMarker.Parent = Workspace
 					ctx.wanderTargetMarker = targetMarker
 
@@ -621,7 +631,7 @@ local WANDER_STATES: NPCStateMachine.StateMap = {
 					beam.Width0 = 0.2
 					beam.Width1 = 0.2
 					beam.Color = ColorSequence.new(Color3.fromRGB(34, 197, 94))
-					beam.Transparency = NumberSequence.new(0.5)
+					beam.Transparency = NumberSequence.new(if beamHidden then 1 else 0.5)
 					beam.FaceCamera = true
 					beam.Parent = npcAttachment
 				end
@@ -852,7 +862,12 @@ local GUARD_STATES: NPCStateMachine.StateMap = {
 
 		onUpdate = function(ctx: NPCEntry, dt: number): string?
 			if ctx.guardReachedWaypoint then
-				return "Guarding"
+				-- Minimum dwell so "Returning" is observable in debug panel
+				ctx.guardReturnDwell = (ctx.guardReturnDwell or 0) + dt
+				if ctx.guardReturnDwell >= GameConfig.NPC.GUARD.RETURN_DWELL then
+					return "Guarding"
+				end
+				return nil
 			end
 
 			-- Throttle detection during return (can interrupt to chase)
@@ -895,6 +910,7 @@ local GUARD_STATES: NPCStateMachine.StateMap = {
 			end
 			ctx.guardDetectTimer = nil
 			ctx.guardReachedWaypoint = nil
+			ctx.guardReturnDwell = nil
 			ctx.pathfinder:stop()
 		end,
 	},
@@ -917,14 +933,22 @@ function NPCManager.initialize(): ()
 	-- Attach state machines — each starts in its initial state (onEnter fires immediately)
 	if patrolEntry then
 		patrolEntry.stateLabel = createStateLabel(patrolEntry.model)
-		patrolEntry.stateMachine =
-			NPCStateMachine.new("Patrolling", PATROL_STATES, patrolEntry, makeStateLabelUpdater(patrolEntry.stateLabel))
+		patrolEntry.stateMachine = NPCStateMachine.new(
+			"Patrolling",
+			PATROL_STATES,
+			patrolEntry,
+			makeStateLabelUpdater(GameConfig.NPC.PATROL.DISPLAY_NAME, patrolEntry.stateLabel)
+		)
 	end
 
 	if wanderEntry then
 		wanderEntry.stateLabel = createStateLabel(wanderEntry.model)
-		wanderEntry.stateMachine =
-			NPCStateMachine.new("Wandering", WANDER_STATES, wanderEntry, makeStateLabelUpdater(wanderEntry.stateLabel))
+		wanderEntry.stateMachine = NPCStateMachine.new(
+			"Wandering",
+			WANDER_STATES,
+			wanderEntry,
+			makeStateLabelUpdater(GameConfig.NPC.WANDER.DISPLAY_NAME, wanderEntry.stateLabel)
+		)
 	end
 
 	if chaseEntry then
@@ -935,8 +959,12 @@ function NPCManager.initialize(): ()
 		-- Chase starts Idle — transitions to Chasing when a player enters detection radius
 		chaseEntry.stateLabel = createStateLabel(chaseEntry.model)
 		chaseEntry.debugDisc = createDetectionRadiusCircle(chaseEntry.model, GameConfig.NPC.CHASE.DETECTION_RADIUS)
-		chaseEntry.stateMachine =
-			NPCStateMachine.new("Idle", CHASE_STATES, chaseEntry, makeStateLabelUpdater(chaseEntry.stateLabel))
+		chaseEntry.stateMachine = NPCStateMachine.new(
+			"Idle",
+			CHASE_STATES,
+			chaseEntry,
+			makeStateLabelUpdater(GameConfig.NPC.CHASE.DISPLAY_NAME, chaseEntry.stateLabel)
+		)
 	end
 
 	local guardEntry = spawnNPC("guard", GameConfig.NPC.GUARD.DISPLAY_NAME, positions.GUARD)
@@ -952,8 +980,12 @@ function NPCManager.initialize(): ()
 			disc.Color = Color3.fromRGB(255, 139, 0) -- Orange (distinct from Chase red)
 		end
 		guardEntry.debugDisc = disc
-		guardEntry.stateMachine =
-			NPCStateMachine.new("Guarding", GUARD_STATES, guardEntry, makeStateLabelUpdater(guardEntry.stateLabel))
+		guardEntry.stateMachine = NPCStateMachine.new(
+			"Guarding",
+			GUARD_STATES,
+			guardEntry,
+			makeStateLabelUpdater(GameConfig.NPC.GUARD.DISPLAY_NAME, guardEntry.stateLabel)
+		)
 	end
 
 	-- Single tick loop for all state machines
@@ -977,6 +1009,109 @@ function NPCManager.initialize(): ()
 	)
 
 	log:info("NPC system ready")
+end
+
+--- Register a callback that fires on every NPC state transition.
+--- Used by DebugService to push state changes to clients.
+function NPCManager.setDebugStateCallback(
+	callback: (npcName: string, newState: string, previousState: string?) -> ()
+): ()
+	debugStateCallback = callback
+end
+
+--- Assemble status data for all NPCs relative to a player position.
+function NPCManager.getAllNPCStatus(playerPosition: Vector3): { [string]: any }
+	local result = {}
+	for name, entry in activeNPCs do
+		local rootPart = entry.model and entry.model.PrimaryPart
+		if not rootPart then
+			continue
+		end
+
+		local npcPos = rootPart.Position
+		local distance = (npcPos - playerPosition).Magnitude
+
+		local state = if entry.stateMachine then entry.stateMachine:getCurrentState() else "Unknown"
+		local humanoid = entry.model:FindFirstChildOfClass("Humanoid")
+		local walkSpeed = if humanoid then humanoid.WalkSpeed else 0
+		local isMoving = entry.pathfinder:isMoving()
+
+		-- Detection radius (Chase and Guard only)
+		local detectionRadius: number? = nil
+		if entry.behaviorType == "chase" then
+			detectionRadius = GameConfig.NPC.CHASE.DETECTION_RADIUS
+		elseif entry.behaviorType == "guard" then
+			detectionRadius = GameConfig.NPC.GUARD.DETECTION_RADIUS
+		end
+
+		-- LOS check (Guard only, when chasing a target)
+		local hasLOS: boolean? = nil
+		if entry.behaviorType == "guard" and entry.guardTarget then
+			local targetRoot = entry.guardTarget:FindFirstChild("HumanoidRootPart")
+			if targetRoot and targetRoot:IsA("BasePart") then
+				hasLOS = entry.pathfinder:hasLineOfSight(targetRoot.Position, { entry.guardTarget })
+			end
+		end
+
+		result[name] = {
+			state = state,
+			position = npcPos,
+			distanceToPlayer = math.floor(distance * 10) / 10,
+			hasLOS = hasLOS,
+			isMoving = isMoving,
+			walkSpeed = walkSpeed,
+			detectionRadius = detectionRadius,
+			behaviorType = entry.behaviorType,
+		}
+	end
+	return result
+end
+
+--- Toggle visibility of a specific debug visual type for an NPC.
+function NPCManager.setDebugVisualEnabled(npcName: string, visualType: string, enabled: boolean): ()
+	local entry = activeNPCs[npcName]
+	if not entry then
+		log:warn(`setDebugVisualEnabled: NPC "{npcName}" not found`)
+		return
+	end
+
+	if visualType == "disc" then
+		if entry.debugDisc then
+			entry.debugDisc.Transparency = if enabled then 0.85 else 1
+		end
+	elseif visualType == "stateLabel" then
+		local head = entry.model:FindFirstChild("Head")
+		if head then
+			local billboard = head:FindFirstChild("StateLabelGui")
+			if billboard and billboard:IsA("BillboardGui") then
+				billboard.Enabled = enabled
+			end
+		end
+	elseif visualType == "waypoints" then
+		if entry.debugFolder then
+			for _, child in entry.debugFolder:GetChildren() do
+				if child:IsA("BasePart") then
+					child.Transparency = if enabled then 0.5 else 1
+				elseif child:IsA("BillboardGui") then
+					child.Enabled = enabled
+				end
+			end
+		end
+	elseif visualType == "wanderBeam" then
+		entry._wanderBeamVisible = enabled
+		-- Toggle existing instances if they exist right now
+		if entry.wanderTargetMarker then
+			entry.wanderTargetMarker.Transparency = if enabled then 0.3 else 1
+		end
+		if entry.wanderNpcAttachment then
+			local beam = entry.wanderNpcAttachment:FindFirstChildOfClass("Beam")
+			if beam then
+				beam.Transparency = NumberSequence.new(if enabled then 0.5 else 1)
+			end
+		end
+	else
+		log:warn(`setDebugVisualEnabled: unknown visualType "{visualType}"`)
+	end
 end
 
 function NPCManager.cleanup(): ()
