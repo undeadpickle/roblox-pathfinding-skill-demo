@@ -1,58 +1,50 @@
 # Session Handoff
 
-> Updated: 2026-02-24 (Session 12)
-> Focus: NPCManager refactor (behavior extraction), debug panel enhancements, chase path dot override fix
+> Updated: 2026-02-24 (Session 13)
+> Focus: Debug panel feature prioritization, perf strip, enhanced teleport
 
 ---
 
 ## What Got Done
 
-### Refactor (T1-T5 from plan)
+### Feature Prioritization
 
-- **T1 — Behavior extraction**: Split NPCManager (1,147 lines) into 6 focused modules. NPCManager is now a ~530-line orchestrator. State definitions live in `src/server/modules/behaviors/`:
-  - `ChaseStates.luau` — Idle ↔ Chasing
-  - `PatrolStates.luau` — Patrolling
-  - `WanderStates.luau` — Wandering
-  - `GuardStates.luau` — Guarding ↔ Chasing ↔ Returning
-  - `BehaviorHelpers.luau` — Shared utilities (findNearestPlayer, getRandomPointInRadius, createWaypointMarkers, evaluateChaseTarget)
-- **T2 — Type holes**: Replaced `any` on `pathfinder` and `stateMachine` NPCEntry fields with `typeof()` pattern. Added `guardReturnDwell: number?`.
-- **T3 — Encapsulation fix**: Removed `ctx.pathfinder._isMoving = true` from GuardStates (was redundant — `moveTo` handles it).
-- **T4 — Merged waypoint factories**: `createWaypointMarkers` and `createGuardWaypointMarkers` consolidated into single `BehaviorHelpers.createWaypointMarkers(waypoints, color, showLines)`.
-- **T5 — Cleanup**: Removed stale VS Code test tasks, removed empty TODO stubs from init files.
+- Evaluated 20 debug panel feature ideas against the project (solo NPC pathfinding prototype)
+- Cut 12 features that don't apply (no production, no noise system, no multiplayer, no custom camera, no UI yet, etc.)
+- Produced ranked top 10 with implementation plan in 5 batches — saved to `.claude/plans/harmonic-sauteeing-torvalds.md`
 
-### Debug Panel Enhancements
+### Batch 1: Perf Strip + Enhanced Teleport
 
-- **3 new toggle types**: Chase Path Dots (`chasePath`), Name Labels (`nameLabel`), Waypoint Numbers (`waypointNumbers`).
-- **Toggle All**: Master on/off switch that syncs all individual toggles and fires remotes for every visual type on every NPC.
-- **NPCPathfinder.setVisualizeEnabled()**: New public method for toggling chase path dot visualization from debug panel.
-
-### Bug Fix — Chase Path Dots Override
-
-- **Problem**: Toggling off chase path dots in debug panel worked momentarily, but dots reappeared when NPCs started new chases (state transitions called `followTarget` which reset `_visualizeEnabled` from config default).
-- **Fix**: Added `_visualizeOverride` field to NPCPathfinder. When set by debug panel, it takes precedence over the behavior default. `nil` = use behavior default, `boolean` = panel override.
+- **Performance strip** (always visible, top-left): FPS, frame time (ms), instance count. Color-coded green/yellow/red by frame time thresholds (16ms/33ms). Instance count polls every 3s. Independent of F8 panel toggle.
+- **Enhanced teleport** — 3 modes in the Teleport section:
+  - "To Spawn Zone" — existing behavior (unchanged)
+  - "To NPC (Current Pos)" — teleports player near NPC's live position
+  - "Summon NPC to Me" — stops NPC pathfinder, teleports NPC to player's position
+- **New NPCManager API**: `getNPCPosition(displayName)`, `teleportNPC(displayName, position)` — `teleportNPC` calls `pathfinder:stop()` before `PivotTo` so movement doesn't fight the teleport.
+- **New DebugPanelUI factories**: `createPerfStrip()`, `createSubLabel()` — sub-labels used to organize teleport section into labeled groups.
 
 ## Files Changed
 
-- `src/server/modules/behaviors/BehaviorHelpers.luau` — **NEW** — Shared behavior utilities
-- `src/server/modules/behaviors/ChaseStates.luau` — **NEW** — Chase state definitions
-- `src/server/modules/behaviors/PatrolStates.luau` — **NEW** — Patrol state definitions
-- `src/server/modules/behaviors/WanderStates.luau` — **NEW** — Wander state definitions
-- `src/server/modules/behaviors/GuardStates.luau` — **NEW** — Guard state definitions
-- `src/server/modules/NPCManager.luau` — Reduced from 1,147 to ~530 lines, imports behavior modules, expanded `setDebugVisualEnabled` with new visual types
-- `src/server/modules/NPCPathfinder.luau` — Added `_visualizeOverride`, `setVisualizeEnabled()`, override-aware `followTarget`
-- `src/client/modules/DebugPanel.luau` — Added 3 new toggle rows, Toggle All master switch, toggle updater sync
-- `src/client/init.client.luau` — Removed empty TODO stub
-- `src/server/init.server.luau` — Removed empty TODO stubs
-- `.vscode/tasks.json` — Removed stale test tasks
-- `CLAUDE.md` — Updated Key Modules, debug panel description
-- `docs/lessons-learned.md` — 5 new rules from this session
+- `src/client/modules/DebugPanel.luau` — Perf strip wiring (RenderStepped + instance count timer), 3 teleport sub-sections
+- `src/client/modules/DebugPanelUI.luau` — `createPerfStrip()`, `createSubLabel()` factory functions
+- `src/server/modules/DebugService.luau` — `TELEPORT_TO_NPC_CURRENT`, `TELEPORT_NPC_TO_PLAYER` handlers
+- `src/server/modules/NPCManager.luau` — `getNPCPosition()`, `teleportNPC()` public methods
+- `src/shared/DebugRemotes.luau` — 2 new remote constants
+- `CLAUDE.md` — Updated NPCManager methods list, debug panel description, added perf strip docs
 
 ## What's Next
 
-1. **Playtest verification**: Confirm all 4 NPCs behave identically after refactor in Studio
-2. **Debug panel follow-up**: Force state transitions, respawn individual NPCs, tuning sliders
-3. **More elevation variety**: Ramps, platforms, multi-level terrain
-4. **Phase 1 core loop**: Player-facing UI, one complete player flow
+### Debug Panel Roadmap (from prioritized plan)
+
+1. **Batch 2**: Force state transitions + Respawn individual NPC
+2. **Batch 3**: Config overrides / tuning sliders (live walk speed, detection radius)
+3. **Batch 4**: Event log (timestamped state transitions) + Player state inspector
+4. **Batch 5**: NPC tick health dashboard + Noclip/fly mode
+
+### Other
+
+5. **More elevation variety**: Ramps, platforms, multi-level terrain
+6. **Phase 1 core loop**: Player-facing UI, one complete player flow
 
 ## Blockers
 
@@ -62,11 +54,11 @@ None.
 
 ## Key Architecture Notes for Next Session
 
-- **Behavior modules**: Each exports a `StateMap` table consumed by `NPCManager.initializeNPC()`. Shared helpers in `BehaviorHelpers.luau`.
-- **`_visualizeOverride` pattern**: NPCPathfinder field. `nil` = use behavior default from `options.visualize`. `boolean` = debug panel override that persists across `followTarget` restarts. Only needed for chase path dots — other visuals are created once and not recreated on state transitions.
-- **`typeof()` typing**: NPCEntry uses `typeof(NPCPathfinder.new(nil :: any))` for metatable class typing without needing explicit export types.
-- **Waypoint marker factory**: `BehaviorHelpers.createWaypointMarkers(waypoints, color, showLines)` — patrol uses yellow + lines, guard uses orange + no lines.
-- **`evaluateChaseTarget`**: Shared helper for chase target re-evaluation used by both ChaseStates and GuardStates. Takes config, target field name, fallback state, and LOS requirement flag.
+- **Force state transitions (Batch 2)**: `NPCStateMachine` has `transitionTo(stateName)` already. Gotcha: forcing Guard into Chasing without a target — `onEnter` expects `ctx.guardTarget`. Need to auto-assign nearest player or warn.
+- **Respawn NPC (Batch 2)**: Per-NPC cleanup path exists in `NPCManager.cleanup()`. Need to extract into reusable `spawnAndConfigureNPC(behaviorType)` — the monolithic `initialize()` does all 4 inline currently.
+- **Config sliders (Batch 3)**: `GameConfig` is frozen (`table.freeze`). Sliders must set values on runtime objects directly. Detection radius needs a `ctx.detectionRadiusOverride` field (same pattern as `_wanderBeamVisible`).
+- **Perf strip**: Lives in its own ScreenGui (`PerfStrip`, DisplayOrder 101), always enabled. Labels updated via RenderStepped (FPS/frame time) and spawned task (instance count, 3s).
+- **Teleport NPC to player**: Calls `pathfinder:stop()` before `PivotTo`. State machine picks up from new position naturally since states read `rootPart.Position` each tick.
 
 ---
 
