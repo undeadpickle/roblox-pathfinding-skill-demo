@@ -250,6 +250,21 @@ function DebugPanelUI.createStatusRow(npcName: string, layoutOrder: number): (Fr
 	return row, stateLabel, metricsLabel
 end
 
+--- Create a small sub-section label (used within sections to label groups).
+function DebugPanelUI.createSubLabel(text: string, layoutOrder: number): TextLabel
+	local label = Instance.new("TextLabel")
+	label.Name = text .. "SubLabel"
+	label.Size = UDim2.new(1, 0, 0, 18)
+	label.BackgroundTransparency = 1
+	label.Text = text
+	label.TextColor3 = COLORS.SECONDARY
+	label.Font = FONTS.BODY
+	label.TextSize = 11
+	label.TextXAlignment = Enum.TextXAlignment.Left
+	label.LayoutOrder = layoutOrder
+	return label
+end
+
 --- Create a styled button.
 function DebugPanelUI.createButton(text: string, color: Color3, layoutOrder: number, onClick: () -> ()): TextButton
 	local btn = Instance.new("TextButton")
@@ -272,6 +287,65 @@ function DebugPanelUI.createButton(text: string, color: Color3, layoutOrder: num
 	btn.MouseButton1Click:Connect(onClick)
 
 	return btn
+end
+
+--- Create an always-visible performance strip (FPS, frame time, instance count).
+--- Returns the ScreenGui and label refs for updating each frame.
+function DebugPanelUI.createPerfStrip(): (ScreenGui, TextLabel, TextLabel, TextLabel)
+	local gui = Instance.new("ScreenGui")
+	gui.Name = "PerfStrip"
+	gui.DisplayOrder = 101
+	gui.ResetOnSpawn = false
+	gui.IgnoreGuiInset = false
+
+	local strip = Instance.new("Frame")
+	strip.Name = "Strip"
+	strip.AnchorPoint = Vector2.new(0, 0)
+	strip.Position = UDim2.fromOffset(10, 10)
+	strip.Size = UDim2.fromOffset(260, 22)
+	strip.BackgroundColor3 = PANEL_BG
+	strip.BackgroundTransparency = 0.3
+	strip.BorderSizePixel = 0
+
+	local stripCorner = Instance.new("UICorner")
+	stripCorner.CornerRadius = UDim.new(0, 4)
+	stripCorner.Parent = strip
+
+	local stripPad = Instance.new("UIPadding")
+	stripPad.PaddingLeft = UDim.new(0, 8)
+	stripPad.PaddingRight = UDim.new(0, 8)
+	stripPad.Parent = strip
+
+	local stripLayout = Instance.new("UIListLayout")
+	stripLayout.FillDirection = Enum.FillDirection.Horizontal
+	stripLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	stripLayout.Padding = UDim.new(0, 12)
+	stripLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+	stripLayout.Parent = strip
+
+	local function makeLabel(name: string, order: number): TextLabel
+		local label = Instance.new("TextLabel")
+		label.Name = name
+		label.Size = UDim2.new(0, 70, 1, 0)
+		label.AutomaticSize = Enum.AutomaticSize.X
+		label.BackgroundTransparency = 1
+		label.Text = "--"
+		label.TextColor3 = COLORS.SUCCESS
+		label.Font = FONTS.BODY
+		label.TextSize = 12
+		label.TextXAlignment = Enum.TextXAlignment.Left
+		label.LayoutOrder = order
+		label.Parent = strip
+		return label
+	end
+
+	local fpsLabel = makeLabel("FPS", 1)
+	local frameTimeLabel = makeLabel("FrameTime", 2)
+	local instanceLabel = makeLabel("Instances", 3)
+
+	strip.Parent = gui
+
+	return gui, fpsLabel, frameTimeLabel, instanceLabel
 end
 
 --- Create a row of teleport buttons in a 2x2 grid.

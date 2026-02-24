@@ -516,6 +516,34 @@ function NPCManager.setDebugVisualEnabled(npcName: string, visualType: string, e
 	end
 end
 
+--- Get an NPC's current world position (or nil if not found).
+function NPCManager.getNPCPosition(displayName: string): Vector3?
+	local entry = activeNPCs[displayName]
+	if not entry then
+		return nil
+	end
+	local rootPart = entry.model and entry.model.PrimaryPart
+	if not rootPart then
+		return nil
+	end
+	return rootPart.Position
+end
+
+--- Teleport an NPC to a world position. Stops current movement first.
+function NPCManager.teleportNPC(displayName: string, position: Vector3): boolean
+	local entry = activeNPCs[displayName]
+	if not entry then
+		return false
+	end
+	-- Stop pathfinder movement so it doesn't fight the teleport
+	entry.pathfinder:stop()
+	entry.model:PivotTo(CFrame.new(position))
+	log:debug(
+		`Teleported NPC "{displayName}" to ({math.floor(position.X)}, {math.floor(position.Y)}, {math.floor(position.Z)})`
+	)
+	return true
+end
+
 function NPCManager.cleanup(): ()
 	-- Disconnect module-level connections (includes PostSimulation tick)
 	for _, connection in moduleConnections do

@@ -14,6 +14,8 @@ DebugRemotes.GET_NPC_STATUS = "Debug_GetNPCStatus"
 -- RemoteEvents (client → server commands)
 DebugRemotes.TOGGLE_VISUAL = "Debug_ToggleVisual"
 DebugRemotes.TELEPORT_TO_NPC = "Debug_TeleportToNPC"
+DebugRemotes.TELEPORT_TO_NPC_CURRENT = "Debug_TeleportToNPCCurrent"
+DebugRemotes.TELEPORT_NPC_TO_PLAYER = "Debug_TeleportNPCToPlayer"
 
 -- RemoteEvents (server → client pushes)
 DebugRemotes.NPC_STATE_CHANGED = "Debug_NPCStateChanged"

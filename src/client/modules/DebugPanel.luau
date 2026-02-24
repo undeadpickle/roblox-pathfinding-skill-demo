@@ -9,7 +9,9 @@
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
+local Workspace = game:GetService("Workspace")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local DebugPanelUI = require(script.Parent.DebugPanelUI)
@@ -211,11 +213,53 @@ function DebugPanel.initialize(): ()
 		table.insert(teleportKeys, { key = npcInfo.key, label = npcInfo.key:sub(1, 1) .. npcInfo.key:sub(2):lower() })
 	end
 
-	local teleportGrid = DebugPanelUI.createTeleportGrid(teleportKeys, 1, function(key: string)
+	-- Subsection label: Spawn Zones
+	local spawnLabel = DebugPanelUI.createSubLabel("To Spawn Zone", 1)
+	spawnLabel.Parent = teleportSection
+
+	local teleportGrid = DebugPanelUI.createTeleportGrid(teleportKeys, 2, function(key: string)
 		teleportEvent:FireServer(key)
 		log:debug(`Teleporting to {key} zone`)
 	end)
 	teleportGrid.Parent = teleportSection
+
+	-- Subsection label: Go to NPC (current position)
+	local goToLabel = DebugPanelUI.createSubLabel("To NPC (Current Pos)", 3)
+	goToLabel.Parent = teleportSection
+
+	local goToEvent = Remotes.getEvent(DebugRemotes.TELEPORT_TO_NPC_CURRENT)
+	local goToKeys = {}
+	for _, npcInfo in NPC_ORDER do
+		table.insert(
+			goToKeys,
+			{ key = npcInfo.displayName, label = npcInfo.key:sub(1, 1) .. npcInfo.key:sub(2):lower() }
+		)
+	end
+
+	local goToGrid = DebugPanelUI.createTeleportGrid(goToKeys, 4, function(displayName: string)
+		goToEvent:FireServer(displayName)
+		log:debug(`Teleporting to {displayName} current pos`)
+	end)
+	goToGrid.Parent = teleportSection
+
+	-- Subsection label: Summon NPC to player
+	local summonLabel = DebugPanelUI.createSubLabel("Summon NPC to Me", 5)
+	summonLabel.Parent = teleportSection
+
+	local summonEvent = Remotes.getEvent(DebugRemotes.TELEPORT_NPC_TO_PLAYER)
+	local summonKeys = {}
+	for _, npcInfo in NPC_ORDER do
+		table.insert(
+			summonKeys,
+			{ key = npcInfo.displayName, label = npcInfo.key:sub(1, 1) .. npcInfo.key:sub(2):lower() }
+		)
+	end
+
+	local summonGrid = DebugPanelUI.createTeleportGrid(summonKeys, 6, function(displayName: string)
+		summonEvent:FireServer(displayName)
+		log:debug(`Summoning {displayName} to player`)
+	end)
+	summonGrid.Parent = teleportSection
 
 	teleportSection.Parent = content
 
@@ -250,6 +294,37 @@ function DebugPanel.initialize(): ()
 	-- Parent to PlayerGui
 	local playerGui = player:WaitForChild("PlayerGui")
 	gui.Parent = playerGui
+
+	-- Performance strip (always visible, independent of panel toggle)
+	local perfGui, fpsLabel, frameTimeLabel, instanceLabel = DebugPanelUI.createPerfStrip()
+
+	-- FPS / frame time: update every render frame
+	RunService.RenderStepped:Connect(function(dt: number)
+		local fps = math.floor(1 / dt)
+		local ftMs = dt * 1000
+
+		fpsLabel.Text = `{fps} fps`
+		frameTimeLabel.Text = string.format("%.1f ms", ftMs)
+
+		-- Color code by frame time: green < 16ms, yellow 16-33ms, red > 33ms
+		local color = if ftMs < 16
+			then GameConfig.UI.COLORS.SUCCESS
+			elseif ftMs < 33 then GameConfig.UI.COLORS.WARNING
+			else GameConfig.UI.COLORS.ERROR
+		fpsLabel.TextColor3 = color
+		frameTimeLabel.TextColor3 = color
+	end)
+
+	-- Instance count: update on a slow timer (every 3s) to avoid overhead
+	task.spawn(function()
+		while true do
+			local count = #Workspace:GetDescendants()
+			instanceLabel.Text = `{count} inst`
+			task.wait(3)
+		end
+	end)
+
+	perfGui.Parent = playerGui
 
 	log:info(`Debug panel ready (toggle: {TOGGLE_KEY.Name})`)
 end

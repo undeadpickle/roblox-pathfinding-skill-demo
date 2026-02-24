@@ -65,6 +65,51 @@ function DebugService.initialize(): ()
 		end
 	end)
 
+	-- TELEPORT_TO_NPC_CURRENT: move player near an NPC's current position (not spawn zone)
+	Remotes.getEvent(DebugRemotes.TELEPORT_TO_NPC_CURRENT).OnServerEvent
+		:Connect(function(player: Player, npcDisplayName: unknown)
+			if typeof(npcDisplayName) ~= "string" then
+				log:warn(`Invalid TELEPORT_TO_NPC_CURRENT args from {player.Name}`)
+				return
+			end
+
+			local npcPos = NPCManager.getNPCPosition(npcDisplayName)
+			if not npcPos then
+				log:warn(`NPC not found for teleport: {npcDisplayName}`)
+				return
+			end
+
+			local character = player.Character
+			if character then
+				character:PivotTo(CFrame.new(npcPos + Vector3.new(5, 0, 5)))
+				log:debug(`Teleported {player.Name} to {npcDisplayName} current pos`)
+			end
+		end)
+
+	-- TELEPORT_NPC_TO_PLAYER: move an NPC near the player's current position
+	Remotes.getEvent(DebugRemotes.TELEPORT_NPC_TO_PLAYER).OnServerEvent
+		:Connect(function(player: Player, npcDisplayName: unknown)
+			if typeof(npcDisplayName) ~= "string" then
+				log:warn(`Invalid TELEPORT_NPC_TO_PLAYER args from {player.Name}`)
+				return
+			end
+
+			local character = player.Character
+			local rootPart = character and character:FindFirstChild("HumanoidRootPart")
+			if not rootPart or not rootPart:IsA("BasePart") then
+				log:warn(`No character for teleport from {player.Name}`)
+				return
+			end
+
+			local playerPos = rootPart.Position
+			local success = NPCManager.teleportNPC(npcDisplayName, playerPos + Vector3.new(5, 0, 5))
+			if success then
+				log:debug(`Teleported {npcDisplayName} to {player.Name}`)
+			else
+				log:warn(`Failed to teleport NPC: {npcDisplayName}`)
+			end
+		end)
+
 	-- Push state changes to all connected clients
 	local stateChangedEvent = Remotes.getEvent(DebugRemotes.NPC_STATE_CHANGED)
 	NPCManager.setDebugStateCallback(function(npcName: string, newState: string, previousState: string?)
