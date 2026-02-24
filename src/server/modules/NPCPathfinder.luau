@@ -159,7 +159,7 @@ function NPCPathfinder:moveTo(targetPosition: Vector3): boolean
 
 	-- Check if close enough for direct movement
 	local distance = (targetPosition - self._rootPart.Position).Magnitude
-	if distance <= self._config.DirectMoveDistance and self:_hasLineOfSight(targetPosition) then
+	if distance <= self._config.DirectMoveDistance and self:hasLineOfSight(targetPosition) then
 		local reached = self:_directMoveTo(targetPosition)
 		self._isMoving = false
 		return reached
@@ -269,7 +269,7 @@ function NPCPathfinder:followTarget(target: Model, options: { [string]: any }?)
 			end
 
 			-- DIRECT CHASE: close + line of sight, skip pathfinding entirely
-			if distance <= self._config.DirectMoveDistance and self:_hasLineOfSight(targetPos) then
+			if distance <= self._config.DirectMoveDistance and self:hasLineOfSight(targetPos) then
 				self._humanoid:MoveTo(targetPos)
 				do
 					local now = tick()
@@ -709,12 +709,18 @@ function NPCPathfinder:_createVisualWaypoints()
 	end
 end
 
-function NPCPathfinder:_hasLineOfSight(targetPosition: Vector3): boolean
+function NPCPathfinder:hasLineOfSight(targetPosition: Vector3, excludeModels: { Model }?): boolean
 	local origin = self._rootPart.Position
 	local direction = targetPosition - origin
 	local params = RaycastParams.new()
 	params.FilterType = Enum.RaycastFilterType.Exclude
-	params.FilterDescendantsInstances = { self._model }
+	local exclusions: { Instance } = { self._model }
+	if excludeModels then
+		for _, model in excludeModels do
+			table.insert(exclusions, model)
+		end
+	end
+	params.FilterDescendantsInstances = exclusions
 
 	local result = Workspace:Raycast(origin, direction, params)
 	return result == nil

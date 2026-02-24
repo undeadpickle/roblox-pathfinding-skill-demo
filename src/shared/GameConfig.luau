@@ -143,6 +143,19 @@ GameConfig.MAP = table.freeze({
 			size = Vector3.new(4, 4, 4),
 			color = Color3.fromRGB(118, 123, 130),
 		}),
+		-- Guard zone walls — create LOS-breaking corridors between patrol waypoints
+		table.freeze({
+			name = "GuardWall1",
+			position = Vector3.new(5, 3, 35),
+			size = Vector3.new(2, 6, 10),
+			color = Color3.fromRGB(95, 100, 107),
+		}),
+		table.freeze({
+			name = "GuardWall2",
+			position = Vector3.new(-5, 3, 35),
+			size = Vector3.new(2, 6, 10),
+			color = Color3.fromRGB(95, 100, 107),
+		}),
 		-- Staircase near chase spawn — tests NPC elevation pathfinding
 		table.freeze({
 			name = "ChaseStairs",
@@ -172,6 +185,7 @@ GameConfig.NPC = table.freeze({
 		CHASE = Vector3.new(30, 5, 0),
 		PATROL = Vector3.new(-30, 5, 0),
 		WANDER = Vector3.new(0, 5, -30),
+		GUARD = Vector3.new(0, 5, 30),
 	}),
 
 	-- Chase NPC: pursues nearest player
@@ -197,6 +211,25 @@ GameConfig.NPC = table.freeze({
 		}),
 	}),
 
+	-- Guard NPC: random patrol with LOS-triggered chase
+	GUARD = table.freeze({
+		DISPLAY_NAME = "Guard NPC",
+		WALK_SPEED = 10,
+		DETECTION_RADIUS = 18,
+		RECOMPUTE_INTERVAL = 0.5,
+		ARRIVAL_DISTANCE = 5,
+		REEVALUATE_INTERVAL = 1,
+		DETECT_INTERVAL = 0.2,
+		PATROL_PAUSE = 1.5,
+		WAYPOINTS = table.freeze({
+			Vector3.new(10, 5, 25),
+			Vector3.new(15, 5, 45),
+			Vector3.new(0, 5, 50),
+			Vector3.new(-15, 5, 45),
+			Vector3.new(-10, 5, 25),
+		}),
+	}),
+
 	-- Wander NPC: roams randomly within a radius
 	WANDER = table.freeze({
 		DISPLAY_NAME = "Wander NPC",
@@ -218,6 +251,8 @@ GameConfig.NPC = table.freeze({
 			Chasing = Color3.fromRGB(239, 68, 68), -- Red (active pursuit)
 			Patrolling = Color3.fromRGB(59, 130, 246), -- Blue (routine)
 			Wandering = Color3.fromRGB(34, 197, 94), -- Green (exploratory)
+			Guarding = Color3.fromRGB(255, 139, 0), -- Orange (guard patrol)
+			Returning = Color3.fromRGB(0, 200, 255), -- Cyan (returning to post)
 		}),
 		DEFAULT_COLOR = Color3.fromRGB(200, 200, 200),
 	}),

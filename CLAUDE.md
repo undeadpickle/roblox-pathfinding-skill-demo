@@ -59,20 +59,22 @@ NPC pathfinding demo showcasing chase, patrol, and wander behaviors using Pathfi
 - `Remotes` — Client-server communication helpers
 - `Logger` — Debug logging with [Server]/[Client] prefixes
 - `MapSetup` — Config-driven obstacle geometry spawner (reads `GameConfig.MAP.OBSTACLES`)
-- `NPCPathfinder` — PathfindingService wrapper with moveTo, patrol, followTarget, wander
+- `NPCPathfinder` — PathfindingService wrapper with moveTo, patrol, followTarget, wander, hasLineOfSight
 - `NPCStateMachine` — Generic finite state machine (shared, reusable for any system). Optional `onStateChanged` callback (4th param) fires on initial state and every transition.
 - `NPCManager` — Spawns NPCs, wires state machines to pathfinder, manages lifecycle
 
 ### NPC Pathfinding System
-- 3 demo NPCs: Chase (follows nearest player), Patrol (loops waypoints), Wander (random points in radius)
-- Behavior driven by state machines: Chase (Idle ↔ Chasing), Patrol (Patrolling), Wander (Wandering)
+- 4 demo NPCs: Chase (follows nearest player), Patrol (loops waypoints), Wander (random points in radius), Guard (random patrol + LOS-triggered chase + return-to-post)
+- Behavior driven by state machines: Chase (Idle ↔ Chasing), Patrol (Patrolling), Wander (Wandering), Guard (Guarding ↔ Chasing ↔ Returning)
 - Single PostSimulation tick drives all state machines; states call NPCPathfinder methods
 - R15 rigs created at runtime via `Players:CreateHumanoidModelFromDescription()`
 - Server-authoritative: `SetNetworkOwner(nil)` on all NPC parts
 - Collision group "NPCs" prevents NPC-to-NPC physics jitter
 - `game:BindToClose` ensures cleanup on server shutdown
 - Chase `followTarget` uses continuous-motion loop (0.1s tick) with event-driven waypoint advancement (`MoveToFinished`), timer-based path recomputation, stuck detection + auto-jump recovery
-- Debug visuals gated by `GameConfig.GAME.DEBUG`: state labels above heads, detection radius disc (chase, anchored + tick-updated), waypoint spheres (chase path, color-coded), patrol waypoint markers, wander beam + target marker
+- Guard detection: distance + LOS raycast (via `hasLineOfSight`) to initiate chase, distance-only to maintain chase (prevents LOS flicker at wall edges). Returns to nearest waypoint when target lost.
+- `hasLineOfSight(targetPos, excludeModels?)` is public on NPCPathfinder. Raycasts from NPC root to target, excluding the NPC model and optionally additional models (e.g., the target player's character).
+- Debug visuals gated by `GameConfig.GAME.DEBUG`: state labels above heads, detection radius disc (chase=red, guard=orange, anchored + tick-updated), waypoint spheres (chase path, color-coded), patrol waypoint markers (yellow), guard waypoint markers (orange, no lines — random order), wander beam + target marker
 
 ### Map & Obstacles
 - Obstacle geometry defined in `GameConfig.MAP.OBSTACLES` (position, size, color per obstacle)
@@ -81,7 +83,9 @@ NPC pathfinding demo showcasing chase, patrol, and wander behaviors using Pathfi
 - PathfindingService auto-carves obstacles from navmesh — no pathfinder code changes needed
 - MapSetup runs before NPCManager so navmesh includes obstacles on first path computation
 - Wander target generation uses `Workspace:Raycast` to reject points inside obstacle footprints
-- Chase NPC has configurable `WALK_SPEED` (default 4) and `DETECTION_RADIUS` (default 10)
+- Guard zone has 2 walls flanking patrol center to create LOS-breaking corridors
+- Chase NPC: `WALK_SPEED` 8, `DETECTION_RADIUS` 15
+- Guard NPC: `WALK_SPEED` 10, `DETECTION_RADIUS` 18, 5 waypoints in pentagon layout (north quadrant)
 
 ## Development Workflow
 
@@ -141,6 +145,8 @@ Format: `- [Category] Brief description of what doesn't work and what to do inst
 - **[Pathfinding] GetWaypoints() waypoint 1 is start position** — Always skip index 1 and start traversal from index 2. Waypoint 1 has the same XZ as the NPC but at navmesh height (Y=0), causing 3D distance checks to fail (hip height Y mismatch). `MoveToFinished:Wait()` doesn't have this problem (it ignores Y).
 - **[Pathfinding] SpawnLocation blocks NPC movement** — Default `CanCollide = true` makes it a physical wall. Set `CanCollide = false`; spawning uses `Enabled`, not collision.
 - **[Pathfinding] PathfindingUseImprovedSearch** — Not scriptable. Must be set manually in Studio: Workspace > Properties > Enabled.
+
+- **[Pathfinding] LOS raycast must exclude target model** — `Workspace:Raycast` from NPC to player hits the player's own body parts (legs, torso) before reaching the HumanoidRootPart position. Always include the target character in `FilterDescendantsInstances` alongside the NPC model when checking line of sight for detection.
 
 ### Humanoid & Physics Gotchas
 

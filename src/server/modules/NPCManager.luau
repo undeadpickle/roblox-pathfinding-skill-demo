@@ -2,10 +2,11 @@
 --[[
 	NPCManager - Spawns and manages demo NPCs with different pathfinding behaviors.
 
-	Spawns 3 NPCs:
+	Spawns 4 NPCs:
 	  - Chase NPC: pursues the nearest player
 	  - Patrol NPC: walks a rectangular loop
 	  - Wander NPC: roams randomly within a radius
+	  - Guard NPC: random patrol with LOS-triggered chase and return-to-post
 
 	Each NPC is driven by a state machine (NPCStateMachine) that manages behavior
 	transitions. The state machine ticks via a single RunService.PostSimulation
@@ -45,6 +46,13 @@ type NPCEntry = {
 	wanderThread: thread?,
 	wanderTargetMarker: Part?,
 	wanderNpcAttachment: Attachment?,
+	-- Guard state fields (populated by state hooks)
+	guardPatrolThread: thread?,
+	guardTarget: Model?,
+	guardReevalTimer: number?,
+	guardDetectTimer: number?,
+	guardLastWaypointIndex: number?,
+	guardReachedWaypoint: boolean?,
 }
 
 local activeNPCs: { [string]: NPCEntry } = {}
@@ -306,6 +314,49 @@ local function createWaypointMarkers(waypoints: { Vector3 }): Folder
 		line.Color = Color3.fromRGB(250, 204, 21)
 		line.Transparency = 0.7
 		line.Parent = folder
+	end
+
+	folder.Parent = Workspace
+	return folder
+end
+
+local function createGuardWaypointMarkers(waypoints: { Vector3 }): Folder
+	local folder = Instance.new("Folder")
+	folder.Name = "GuardWaypointMarkers"
+
+	for i, wp in waypoints do
+		local marker = Instance.new("Part")
+		marker.Name = `Waypoint_{i}`
+		marker.Shape = Enum.PartType.Ball
+		marker.Size = Vector3.new(2, 2, 2)
+		marker.Position = wp
+		marker.Anchored = true
+		marker.CanCollide = false
+		marker.CanTouch = false
+		marker.CanQuery = false
+		marker.Material = Enum.Material.Neon
+		marker.Color = Color3.fromRGB(255, 139, 0) -- Orange (guard)
+		marker.Transparency = 0.5
+		marker.CastShadow = false
+
+		local billboard = Instance.new("BillboardGui")
+		billboard.Size = UDim2.fromOffset(40, 40)
+		billboard.StudsOffset = Vector3.new(0, 2, 0)
+		billboard.AlwaysOnTop = true
+
+		local label = Instance.new("TextLabel")
+		label.Size = UDim2.fromScale(1, 1)
+		label.BackgroundTransparency = 1
+		label.Text = tostring(i)
+		label.TextColor3 = Color3.fromRGB(255, 139, 0)
+		label.TextStrokeTransparency = 0
+		label.Font = Enum.Font.GothamBold
+		label.TextScaled = true
+		label.Parent = billboard
+
+		billboard.Parent = marker
+		marker.Parent = folder
+		-- No connecting lines: guard patrol order is random
 	end
 
 	folder.Parent = Workspace
@@ -616,6 +667,239 @@ local WANDER_STATES: NPCStateMachine.StateMap = {
 	},
 }
 
+-- Guard NPC: random patrol → LOS-triggered chase → return to post
+local GUARD_STATES: NPCStateMachine.StateMap = {
+	Guarding = {
+		onEnter = function(ctx: NPCEntry)
+			local config = GameConfig.NPC.GUARD
+
+			if GameConfig.GAME.DEBUG and not ctx.debugFolder then
+				ctx.debugFolder = createGuardWaypointMarkers(config.WAYPOINTS)
+			end
+
+			local lastIndex = ctx.guardLastWaypointIndex or 0
+			ctx.guardPatrolThread = task.spawn(function()
+				while ctx.model and ctx.model:IsDescendantOf(game) do
+					-- Pick random waypoint, excluding the last one visited
+					local candidates = {}
+					for i = 1, #config.WAYPOINTS do
+						if i ~= lastIndex then
+							table.insert(candidates, i)
+						end
+					end
+					local nextIndex = candidates[math.random(1, #candidates)]
+					lastIndex = nextIndex
+					ctx.guardLastWaypointIndex = nextIndex
+
+					log:debug(`Guard NPC: heading to waypoint {nextIndex}`)
+					ctx.pathfinder._isMoving = true
+					ctx.pathfinder:moveTo(config.WAYPOINTS[nextIndex])
+
+					task.wait(config.PATROL_PAUSE)
+				end
+			end)
+		end,
+
+		onUpdate = function(ctx: NPCEntry, dt: number): string?
+			-- Throttle detection (no need to raycast every frame)
+			ctx.guardDetectTimer = (ctx.guardDetectTimer or 0) + dt
+			if ctx.guardDetectTimer < GameConfig.NPC.GUARD.DETECT_INTERVAL then
+				return nil
+			end
+			ctx.guardDetectTimer = 0
+
+			local rootPart = ctx.model.PrimaryPart
+			if not rootPart then
+				return nil
+			end
+
+			local target = findNearestPlayer(rootPart.Position)
+			if not target then
+				return nil
+			end
+
+			local targetRoot = target:FindFirstChild("HumanoidRootPart")
+			if not targetRoot then
+				return nil
+			end
+
+			local distance = ((targetRoot :: BasePart).Position - rootPart.Position).Magnitude
+			if distance <= GameConfig.NPC.GUARD.DETECTION_RADIUS then
+				if ctx.pathfinder:hasLineOfSight((targetRoot :: BasePart).Position, { target }) then
+					ctx.guardTarget = target
+					return "Chasing"
+				end
+			end
+
+			return nil
+		end,
+
+		onExit = function(ctx: NPCEntry)
+			if ctx.guardPatrolThread then
+				task.cancel(ctx.guardPatrolThread)
+				ctx.guardPatrolThread = nil
+			end
+			ctx.guardDetectTimer = nil
+			ctx.pathfinder:stop()
+		end,
+	},
+
+	Chasing = {
+		onEnter = function(ctx: NPCEntry)
+			local target = ctx.guardTarget
+			if not target then
+				return
+			end
+
+			local config = GameConfig.NPC.GUARD
+			ctx.pathfinder:followTarget(target, {
+				recomputeInterval = config.RECOMPUTE_INTERVAL,
+				arrivalDistance = config.ARRIVAL_DISTANCE,
+				visualize = GameConfig.GAME.DEBUG,
+				onTargetLost = function()
+					log:debug("Guard NPC: target lost (callback)")
+				end,
+			})
+		end,
+
+		onUpdate = function(ctx: NPCEntry, dt: number): string?
+			local rootPart = ctx.model.PrimaryPart
+			if not rootPart then
+				return nil
+			end
+
+			-- Throttle re-evaluation
+			ctx.guardReevalTimer = (ctx.guardReevalTimer or 0) + dt
+			if ctx.guardReevalTimer < GameConfig.NPC.GUARD.REEVALUATE_INTERVAL then
+				return nil
+			end
+			ctx.guardReevalTimer = 0
+
+			-- Distance-only check to maintain chase (no LOS flicker at wall edges)
+			local currentTarget = ctx.guardTarget
+			local currentTargetValid = false
+
+			if currentTarget and currentTarget:IsDescendantOf(game) then
+				local targetRoot = currentTarget:FindFirstChild("HumanoidRootPart")
+				if targetRoot then
+					local distance = ((targetRoot :: BasePart).Position - rootPart.Position).Magnitude
+					if distance <= GameConfig.NPC.GUARD.DETECTION_RADIUS then
+						currentTargetValid = true
+					end
+				end
+			end
+
+			if not currentTargetValid then
+				ctx.guardTarget = nil
+				return "Returning"
+			end
+
+			-- Check if a closer player is a better target (distance + LOS to start new chase)
+			local nearest = findNearestPlayer(rootPart.Position)
+			if nearest and nearest ~= currentTarget then
+				local nearestRoot = nearest:FindFirstChild("HumanoidRootPart")
+				if nearestRoot then
+					local dist = ((nearestRoot :: BasePart).Position - rootPart.Position).Magnitude
+					if dist <= GameConfig.NPC.GUARD.DETECTION_RADIUS then
+						if ctx.pathfinder:hasLineOfSight((nearestRoot :: BasePart).Position, { nearest }) then
+							ctx.guardTarget = nearest
+							return "Chasing"
+						end
+					end
+				end
+			end
+
+			return nil
+		end,
+
+		onExit = function(ctx: NPCEntry)
+			ctx.pathfinder:stop()
+			ctx.guardReevalTimer = nil
+		end,
+	},
+
+	Returning = {
+		onEnter = function(ctx: NPCEntry)
+			ctx.guardReachedWaypoint = false
+
+			local rootPart = ctx.model.PrimaryPart
+			if not rootPart then
+				ctx.guardReachedWaypoint = true
+				return
+			end
+
+			-- Find nearest waypoint
+			local waypoints = GameConfig.NPC.GUARD.WAYPOINTS
+			local nearestIndex = 1
+			local nearestDist = math.huge
+			for i, wp in waypoints do
+				local dist = (wp - rootPart.Position).Magnitude
+				if dist < nearestDist then
+					nearestDist = dist
+					nearestIndex = i
+				end
+			end
+
+			ctx.guardLastWaypointIndex = nearestIndex
+			log:debug(`Guard NPC: returning to waypoint {nearestIndex}`)
+
+			ctx.guardPatrolThread = task.spawn(function()
+				ctx.pathfinder._isMoving = true
+				ctx.pathfinder:moveTo(waypoints[nearestIndex])
+				ctx.guardReachedWaypoint = true
+			end)
+		end,
+
+		onUpdate = function(ctx: NPCEntry, dt: number): string?
+			if ctx.guardReachedWaypoint then
+				return "Guarding"
+			end
+
+			-- Throttle detection during return (can interrupt to chase)
+			ctx.guardDetectTimer = (ctx.guardDetectTimer or 0) + dt
+			if ctx.guardDetectTimer < GameConfig.NPC.GUARD.DETECT_INTERVAL then
+				return nil
+			end
+			ctx.guardDetectTimer = 0
+
+			local rootPart = ctx.model.PrimaryPart
+			if not rootPart then
+				return nil
+			end
+
+			local target = findNearestPlayer(rootPart.Position)
+			if not target then
+				return nil
+			end
+
+			local targetRoot = target:FindFirstChild("HumanoidRootPart")
+			if not targetRoot then
+				return nil
+			end
+
+			local distance = ((targetRoot :: BasePart).Position - rootPart.Position).Magnitude
+			if distance <= GameConfig.NPC.GUARD.DETECTION_RADIUS then
+				if ctx.pathfinder:hasLineOfSight((targetRoot :: BasePart).Position, { target }) then
+					ctx.guardTarget = target
+					return "Chasing"
+				end
+			end
+
+			return nil
+		end,
+
+		onExit = function(ctx: NPCEntry)
+			if ctx.guardPatrolThread then
+				task.cancel(ctx.guardPatrolThread)
+				ctx.guardPatrolThread = nil
+			end
+			ctx.guardDetectTimer = nil
+			ctx.guardReachedWaypoint = nil
+			ctx.pathfinder:stop()
+		end,
+	},
+}
+
 -- ═══════════════════════════════════════════════════════════
 -- PUBLIC API
 -- ═══════════════════════════════════════════════════════════
@@ -653,6 +937,23 @@ function NPCManager.initialize(): ()
 		chaseEntry.debugDisc = createDetectionRadiusCircle(chaseEntry.model, GameConfig.NPC.CHASE.DETECTION_RADIUS)
 		chaseEntry.stateMachine =
 			NPCStateMachine.new("Idle", CHASE_STATES, chaseEntry, makeStateLabelUpdater(chaseEntry.stateLabel))
+	end
+
+	local guardEntry = spawnNPC("guard", GameConfig.NPC.GUARD.DISPLAY_NAME, positions.GUARD)
+	if guardEntry then
+		local humanoid = guardEntry.model:FindFirstChildOfClass("Humanoid")
+		if humanoid then
+			humanoid.WalkSpeed = GameConfig.NPC.GUARD.WALK_SPEED
+		end
+		-- Guard starts Guarding — LOS+distance triggers Chasing, then Returning to post
+		guardEntry.stateLabel = createStateLabel(guardEntry.model)
+		local disc = createDetectionRadiusCircle(guardEntry.model, GameConfig.NPC.GUARD.DETECTION_RADIUS)
+		if disc then
+			disc.Color = Color3.fromRGB(255, 139, 0) -- Orange (distinct from Chase red)
+		end
+		guardEntry.debugDisc = disc
+		guardEntry.stateMachine =
+			NPCStateMachine.new("Guarding", GUARD_STATES, guardEntry, makeStateLabelUpdater(guardEntry.stateLabel))
 	end
 
 	-- Single tick loop for all state machines

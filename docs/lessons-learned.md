@@ -82,3 +82,11 @@
 - **[Luau]** Don't use Python-style format specifiers (`:.1f`) in Luau interpolated strings. Luau string interpolation only supports raw expressions inside `{}`. Use `math.floor()` or `string.format()` for number formatting.
 
 - **[Roblox]** Don't forget `CastShadow = false` on debug visualization Parts. Large transparent debug discs/markers cast visible shadows that confuse the scene. Always disable shadow casting on non-gameplay visual elements.
+
+## Session: 2026-02-23 — Guard NPC (Patrol + Chase Hybrid)
+
+- **[Roblox]** Don't use `hasLineOfSight` raycast without excluding the target player's character model. The ray from NPC root to player HumanoidRootPart position hits the player's own body parts (legs, torso) first, making LOS always return false. Pass the target model in `FilterDescendantsInstances` alongside the NPC model.
+
+- **[Architecture]** Don't require LOS to _maintain_ a chase — only require it to _initiate_ a chase. Using LOS for Chasing→Returning transitions causes flicker at wall edges where the player model partially peeks out frame-to-frame. Use distance-only for disengage, LOS+distance for engage.
+
+- **[Architecture]** Don't add random waypoint selection to a generic patrol method. Use the existing `moveTo` in a spawned thread loop with random index selection — same pattern as the Wander NPC. Keeps the pathfinder module simple and behavior logic in the state machine where it belongs.
