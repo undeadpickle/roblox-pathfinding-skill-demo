@@ -591,6 +591,11 @@ function NPCPathfinder:_recreatePath()
 end
 
 function NPCPathfinder:_computePath(targetPosition: Vector3): boolean
+	-- Skip recompute while airborne — start position is unreliable mid-air
+	if self._humanoid:GetState() == Enum.HumanoidStateType.Freefall then
+		return #self._waypoints > 0
+	end
+
 	-- Throttle recomputation
 	local now = tick()
 	if now - self._lastComputeTime < self._config.RecomputeInterval * 0.5 then
