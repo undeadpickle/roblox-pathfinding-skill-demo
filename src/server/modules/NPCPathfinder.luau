@@ -195,6 +195,8 @@ function NPCPathfinder:followTarget(target: Model, options: { [string]: any }?)
 	self:stop()
 	self._isMoving = true
 
+	local lastZoneLogTime = 0
+
 	-- Event-driven waypoint advancement: MoveToFinished advances the index
 	-- and issues the next MoveTo, so the NPC never pauses between waypoints.
 	local moveConnection = self._humanoid.MoveToFinished:Connect(function(reached)
@@ -243,6 +245,13 @@ function NPCPathfinder:followTarget(target: Model, options: { [string]: any }?)
 			-- ARRIVAL: keep moving toward target instead of stopping dead
 			if distance <= arrivalDistance then
 				self._humanoid:MoveTo(targetPos)
+				do
+					local now = tick()
+					if now - lastZoneLogTime >= 2.0 then
+						lastZoneLogTime = now
+						log:debug(`followTarget zone=Arrival dist={math.floor(distance)}`)
+					end
+				end
 				if onArrival then
 					local now = tick()
 					if not self._lastArrivalTime or now - self._lastArrivalTime >= 0.5 then
@@ -262,6 +271,13 @@ function NPCPathfinder:followTarget(target: Model, options: { [string]: any }?)
 			-- DIRECT CHASE: close + line of sight, skip pathfinding entirely
 			if distance <= self._config.DirectMoveDistance and self:_hasLineOfSight(targetPos) then
 				self._humanoid:MoveTo(targetPos)
+				do
+					local now = tick()
+					if now - lastZoneLogTime >= 2.0 then
+						lastZoneLogTime = now
+						log:debug(`followTarget zone=DirectChase dist={math.floor(distance)}`)
+					end
+				end
 				-- Clear stale waypoints so we recompute fresh when LoS breaks
 				self._waypoints = {}
 				self._currentWaypointIndex = 0
@@ -303,6 +319,14 @@ function NPCPathfinder:followTarget(target: Model, options: { [string]: any }?)
 			else
 				-- No waypoints (path failed or pending) — best-effort direct move
 				self._humanoid:MoveTo(targetPos)
+			end
+
+			do
+				local now = tick()
+				if now - lastZoneLogTime >= 2.0 then
+					lastZoneLogTime = now
+					log:debug(`followTarget zone=Pathfinding dist={math.floor(distance)} waypoints={#self._waypoints}`)
+				end
 			end
 
 			-- Stuck detection: if no progress for stuckCheckInterval, jump + recompute

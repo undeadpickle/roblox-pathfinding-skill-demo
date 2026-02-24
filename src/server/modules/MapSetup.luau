@@ -27,23 +27,43 @@ function MapSetup.initialize(): ()
 
 	local folder = Instance.new("Folder")
 	folder.Name = "Obstacles"
+	local partCount = 0
 
 	for _, config in GameConfig.MAP.OBSTACLES do
-		local part = Instance.new("Part")
-		part.Name = config.name
-		part.Size = config.size
-		part.Position = config.position
-		part.Color = config.color
-		part.Material = Enum.Material.SmoothPlastic
-		part.Anchored = true
-		part.CanCollide = true
-		part.Parent = folder
+		if config.type == "staircase" then
+			-- Generate ascending steps from base position (+Z direction)
+			local stepSize = config.stepSize
+			for i = 0, config.steps - 1 do
+				local step = Instance.new("Part")
+				step.Name = `{config.name}_Step{i + 1}`
+				step.Size = stepSize
+				step.Position = config.position
+					+ Vector3.new(0, i * stepSize.Y + stepSize.Y / 2, i * stepSize.Z + stepSize.Z / 2)
+				step.Color = config.color
+				step.Material = Enum.Material.SmoothPlastic
+				step.Anchored = true
+				step.CanCollide = true
+				step.Parent = folder
+				partCount += 1
+			end
+		else
+			local part = Instance.new("Part")
+			part.Name = config.name
+			part.Size = config.size
+			part.Position = config.position
+			part.Color = config.color
+			part.Material = Enum.Material.SmoothPlastic
+			part.Anchored = true
+			part.CanCollide = true
+			part.Parent = folder
+			partCount += 1
+		end
 	end
 
 	folder.Parent = Workspace
 	obstacleFolder = folder
 
-	log:info(`Created {#GameConfig.MAP.OBSTACLES} obstacles`)
+	log:info(`Created {partCount} obstacle parts from {#GameConfig.MAP.OBSTACLES} entries`)
 end
 
 function MapSetup.cleanup(): ()

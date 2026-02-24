@@ -72,15 +72,16 @@ NPC pathfinding demo showcasing chase, patrol, and wander behaviors using Pathfi
 - Collision group "NPCs" prevents NPC-to-NPC physics jitter
 - `game:BindToClose` ensures cleanup on server shutdown
 - Chase `followTarget` uses continuous-motion loop (0.1s tick) with event-driven waypoint advancement (`MoveToFinished`), timer-based path recomputation, stuck detection + auto-jump recovery
-- Debug visuals gated by `GameConfig.GAME.DEBUG`: state labels above heads, detection radius disc (chase), waypoint spheres (chase path, color-coded), patrol waypoint markers
+- Debug visuals gated by `GameConfig.GAME.DEBUG`: state labels above heads, detection radius disc (chase, anchored + tick-updated), waypoint spheres (chase path, color-coded), patrol waypoint markers, wander beam + target marker
 
 ### Map & Obstacles
 - Obstacle geometry defined in `GameConfig.MAP.OBSTACLES` (position, size, color per obstacle)
 - `MapSetup.initialize()` creates anchored `CanCollide = true` Parts in a `Workspace.Obstacles` folder
+- Supports `type = "staircase"` entries: generates ascending steps from base position (+Z), configurable via `steps` and `stepSize`
 - PathfindingService auto-carves obstacles from navmesh — no pathfinder code changes needed
 - MapSetup runs before NPCManager so navmesh includes obstacles on first path computation
 - Wander target generation uses `Workspace:Raycast` to reject points inside obstacle footprints
-- Chase NPC has configurable `WALK_SPEED` (default 24, vs player default 16)
+- Chase NPC has configurable `WALK_SPEED` (default 4) and `DETECTION_RADIUS` (default 10)
 
 ## Development Workflow
 

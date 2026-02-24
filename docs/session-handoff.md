@@ -1,42 +1,42 @@
 # Session Handoff
 
-> Updated: 2026-02-23 (Session 8)
-> Focus: Chase NPC smooth pursuit — fixed stop-start stutter, added SimplePath-inspired improvements
+> Updated: 2026-02-23 (Session 9)
+> Focus: Detection disc visibility fix, NPC orientation fix, debug logging, wander beam visualization, staircase obstacle
 
 ---
 
 ## What Got Done
 
-- **Chase followTarget() rewrite**: Replaced sequential compute-traverse-wait loop (50% idle time) with continuous 0.1s tick loop. NPC always has an active MoveTo — no dead time between recompute cycles.
-- **Event-driven waypoint advancement**: Replaced distance polling with `MoveToFinished` listener. Waypoint-to-waypoint transitions are instant instead of up to 0.1s late.
-- **Stuck detection + auto-jump**: `followTarget` now tracks progress via `_lastProgressPosition`/`_lastProgressTime`. If no movement for 2s, NPC jumps and force-recomputes path. Prevents permanent wedging against geometry.
-- **Jump on Path.Blocked**: `_onPathBlocked` now fires `Humanoid.Jump = true` before the deferred recompute — cheap recovery for small dynamic obstacles.
-- **Waypoint visualization**: Color-coded neon spheres (orange=normal, red=jump, green=destination) at each computed waypoint. Recreated on every path recompute, destroyed on stop. Gated by `visualize` option passed from NPCManager.
-- **Detection radius disc**: Red semi-transparent cylinder welded to chase NPC root part showing 50-stud detection radius. Gated by `GameConfig.GAME.DEBUG`.
-- **Removed dead code**: `_traverseWaypointsNonBlocking()` deleted — replaced by the continuous loop + MoveToFinished pattern.
-- **lessons-learned.md updated**: 5 new rules from this session (continuous loop vs compute-wait, MoveToFinished vs polling, arrival MoveTo, jump on blocked, stuck detection in followTarget).
-- **CLAUDE.md updated**: NPC Pathfinding System section now describes the new chase architecture and all debug visuals.
+- **Detection disc fix**: Root cause was missing `Massless = true` on a 100-stud diameter cylinder welded to the NPC (~1,100 mass units vs ~25 for the humanoid). Switched from WeldConstraint to anchored Part with explicit CFrame update in PostSimulation tick. Added `CastShadow = false`, tuned transparency to 0.85, positioned at Y=0.15.
+- **NPC orientation fix**: Resolved by removing the massive welded disc. `Humanoid:MoveTo()` now rotates the assembly correctly since the physics assembly has sane mass/inertia.
+- **Chase NPC tuning**: Reduced `WALK_SPEED` from 24 to 4 and `DETECTION_RADIUS` from 50 to 10 for easier testing.
+- **Debug zone logging**: Added throttled (2s interval) log messages in `followTarget` for each movement zone (Arrival, DirectChase, Pathfinding) with distance and waypoint count.
+- **State transition logging**: Added `log:debug` in `makeStateLabelUpdater` — all NPC state changes are now logged.
+- **Wander beam visualization**: Green Beam from wander NPC to its current target + green marker sphere at destination. Uses Attachment pairs (one on rootPart, one on target marker). Gated by `GameConfig.GAME.DEBUG`, cleaned up in `onExit`.
+- **Staircase obstacle**: Extended MapSetup to support `type = "staircase"` config entries. Added 8-step staircase at (45, 0, 10) ascending in +Z, northeast of chase NPC spawn. Each step is 6×1×2 studs.
+- **Lessons learned**: 4 new rules (anchored vs welded debug visuals, Luau format specifiers, CastShadow on debug parts, Massless on welded parts).
+- **CLAUDE.md updated**: Architecture sections updated for new debug visuals, staircase support, and current chase config values.
 
 ## Files Changed
 
-- `src/server/modules/NPCPathfinder.luau` — followTarget rewrite, _onPathBlocked jump, visual waypoint helpers, _traverseWaypointsNonBlocking removed
-- `src/server/modules/NPCManager.luau` — detection radius disc, visualize option wired to followTarget
-- `docs/lessons-learned.md` — new session entry
-- `CLAUDE.md` — architecture section updated
+- `src/server/modules/NPCManager.luau` — Detection disc rewrite (anchored + tick-updated), wander beam visualization, state transition logging
+- `src/server/modules/NPCPathfinder.luau` — Zone logging in followTarget
+- `src/server/modules/MapSetup.luau` — Staircase type support
+- `src/shared/GameConfig.luau` — Chase speed/radius tuning, staircase obstacle entry
+- `docs/lessons-learned.md` — 4 new rules
+- `CLAUDE.md` — Architecture updates
 
 ## What's Next
 
-1. **Playtest verification**: Rojo sync + Studio playtest to confirm smooth chase, waypoint visuals, stuck recovery, and no regressions on patrol/wander
-2. **Detection radius disc orientation bug**: The disc was created but user reported not seeing it — may need CFrame debugging (cylinder orientation, ground-level positioning)
-3. **Chase NPC orientation**: NPC doesn't face the player during pursuit — may need CFrame.lookAt or MoveTo direction tuning
-4. **Wander radius visualization**: Debug circle for wander boundary (same pattern as detection disc)
-5. **More obstacle variety**: Ramps, elevated platforms to test AgentCanJump waypoints
-6. **Phase 1 core loop**: Basic UI showing game state, one complete player flow
+1. **Playtest stairs**: Verify chase NPC can pathfind up the staircase when pursuing a player (AgentCanJump should handle 1-stud steps)
+2. **NPC orientation verification**: Confirm the NPC now faces the direction of movement during all chase zones (was fixed by removing welded disc mass, but not yet verified in playtest)
+3. **Wander beam verification**: Confirm the green beam and target marker render correctly during playtest
+4. **More elevation variety**: Ramps, platforms, multi-level terrain to further test vertical pathfinding
+5. **Phase 1 core loop**: Basic UI showing game state, one complete player flow
 
 ## Blockers
 
-- **Detection radius disc not visible** — reported by user before session was interrupted. Needs investigation (may be Y-positioning, cylinder orientation, or transparency issue).
-- **Chase NPC not facing player** — reported alongside disc issue. The Humanoid steers toward MoveTo target but may not rotate fast enough or may face waypoint direction instead of target direction.
+None — all previous blockers (disc visibility, NPC orientation) have been addressed. Pending playtest verification.
 
 ---
 
@@ -44,27 +44,28 @@
 
 ### What Worked
 
-- **SimplePath source code analysis**: Reading the actual module code (not just the forum post) revealed concrete patterns worth stealing — especially MoveToFinished-driven advancement and stuck detection. The comparison framework (what to steal vs what we do better) kept the scope focused.
-- **Incremental plan → execute flow**: Planning the followTarget rewrite separately from the SimplePath improvements prevented scope creep. Each change was testable independently.
-- **Existing field reuse**: `_lastProgressPosition`/`_lastProgressTime` were already in the constructor from the skill asset — just unused by followTarget. No new fields needed for stuck detection.
+- **Root cause analysis on disc mass**: Calculating the actual mass (π × 50² × 0.2 × 0.7 ≈ 1,100 vs humanoid ~25) immediately explained both the orientation AND visibility bugs from a single cause. Physics reasoning before code changes saved iteration cycles.
+- **Switching from weld to anchored + tick**: Eliminated all physics edge cases (weld activation timing, mass interference, gravity on unanchored parts). More predictable and easier to debug.
+- **Beam for wander visualization**: Roblox Beam + Attachment pairs provide a clean dynamic line that automatically follows the NPC without per-frame updates for the line itself. Only the target marker position needs updating.
 
 ### What Broke
 
-- Detection radius disc visualization not confirmed working — user reported not seeing it. Created but possibly wrong CFrame orientation or Y-offset.
-- Chase NPC face orientation issue surfaced but wasn't addressed (session pivoted to SimplePath analysis).
+- **Luau format specifiers**: Used Python-style `:.1f` in interpolated strings, which caused 32 parse errors. Luau interpolation only supports raw expressions. Caught by selene before reaching Studio.
+- **Disc Y positioning**: First attempt at Y=0.15 was partially underground. Raised to Y=0.5, then user requested back to Y=0.15 — still works with the anchored approach since there's no physics bob from walking animation affecting it.
 
 ### Wrong Assumptions
 
-- Assumed the cylinder CFrame for the detection disc was correct without playtesting. Should have offered to verify via MCP `run_code` before moving on.
+- Assumed Luau string interpolation supported format specifiers like Python f-strings. Should have checked Luau docs first.
+- Initially assumed the disc's WeldConstraint approach was correct — should have recognized the mass problem earlier (it was a 100-stud Part welded to a character).
 
 ---
 
 ## Key Architecture Notes for Next Session
 
-- **followTarget is now a 0.1s continuous loop** with MoveToFinished event for waypoint advancement. The loop handles 3 zones: arrival (MoveTo target), direct chase (LoS, skip pathfinding), and pathfinding (timer-based recompute). Stuck detection runs in the pathfinding zone only.
-- **MoveToFinished connection is local** to the followTarget thread — created before the loop, disconnected on exit. Not stored on self, so no stale connection risk.
-- **Visual waypoints use a clone template** (`waypointTemplate` module-level Part). Cloned per waypoint, destroyed on recompute and stop. Gated by `options.visualize`, not directly by GameConfig (keeps NPCPathfinder decoupled from GameConfig).
-- **Detection radius disc is welded** to the NPC root part via WeldConstraint. Parented to Workspace (not the model) so it doesn't affect the model hierarchy.
+- **Detection disc is now anchored** (not welded). Its CFrame is explicitly set in the PostSimulation tick loop in NPCManager. Y is fixed at 0.15 regardless of NPC elevation.
+- **Wander beam uses Attachment pairs**: npcAttachment on rootPart (contains the Beam child), targetAttachment on targetMarker. Destroying npcAttachment cascades to Beam. Destroying targetMarker cascades to targetAttachment.
+- **MapSetup staircase type**: `type = "staircase"` in obstacle config generates individual step Parts. Steps ascend in +Z direction from the base position. Each step offset: `(0, i * stepHeight + stepHeight/2, i * stepDepth + stepDepth/2)`.
+- **Chase config is tuned low for testing**: WALK_SPEED=4, DETECTION_RADIUS=10. Will need to be raised for gameplay.
 
 ---
 

@@ -72,3 +72,13 @@
 - **[Pathfinding]** Don't rely only on path recomputation when `Path.Blocked` fires. Try `Humanoid.Jump = true` first — it's cheaper and often clears small dynamic obstacles without needing a full `ComputeAsync` cycle.
 
 - **[Roblox]** Don't forget stuck detection in `followTarget`. The `_lastProgressPosition`/`_lastProgressTime` fields existed but were only used by `_traverseWaypoints` (blocking patrol). Chase loops need their own stuck check with a shorter threshold (2s vs 8s) since chase demands responsiveness.
+
+## Session: 2026-02-23 — Detection Disc & NPC Orientation Fix
+
+- **[Roblox]** Don't weld large Parts to a Humanoid's RootPart without `Massless = true`. A 100-stud diameter cylinder has ~1,100 mass units vs the Humanoid's ~25. The massive inertia prevents `MoveTo()` from rotating the assembly (NPC faces sideways) and can destabilize physics rendering (disc invisible). Always set `Massless = true` on debug/visual Parts welded to characters.
+
+- **[Roblox]** Don't use WeldConstraint for debug visualizations that need to follow an NPC. Welds add physics complexity (mass, inertia, activation timing). Use an anchored Part and explicitly update its CFrame in the PostSimulation tick instead — simpler, more predictable, no physics edge cases.
+
+- **[Luau]** Don't use Python-style format specifiers (`:.1f`) in Luau interpolated strings. Luau string interpolation only supports raw expressions inside `{}`. Use `math.floor()` or `string.format()` for number formatting.
+
+- **[Roblox]** Don't forget `CastShadow = false` on debug visualization Parts. Large transparent debug discs/markers cast visible shadows that confuse the scene. Always disable shadow casting on non-gameplay visual elements.

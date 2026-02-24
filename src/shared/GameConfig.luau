@@ -143,6 +143,15 @@ GameConfig.MAP = table.freeze({
 			size = Vector3.new(4, 4, 4),
 			color = Color3.fromRGB(118, 123, 130),
 		}),
+		-- Staircase near chase spawn — tests NPC elevation pathfinding
+		table.freeze({
+			name = "ChaseStairs",
+			type = "staircase",
+			position = Vector3.new(45, 0, 10),
+			steps = 8,
+			stepSize = Vector3.new(6, 1, 2),
+			color = Color3.fromRGB(90, 95, 102),
+		}),
 	}),
 })
 
@@ -168,8 +177,8 @@ GameConfig.NPC = table.freeze({
 	-- Chase NPC: pursues nearest player
 	CHASE = table.freeze({
 		DISPLAY_NAME = "Chase NPC",
-		WALK_SPEED = 24,
-		DETECTION_RADIUS = 50,
+		WALK_SPEED = 8,
+		DETECTION_RADIUS = 15,
 		RECOMPUTE_INTERVAL = 0.5,
 		ARRIVAL_DISTANCE = 5,
 		REEVALUATE_INTERVAL = 3,

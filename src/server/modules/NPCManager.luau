@@ -43,6 +43,8 @@ type NPCEntry = {
 	chaseReevalTimer: number?,
 	-- Wander state fields (populated by state hooks)
 	wanderThread: thread?,
+	wanderTargetMarker: Part?,
+	wanderNpcAttachment: Attachment?,
 }
 
 local activeNPCs: { [string]: NPCEntry } = {}
@@ -183,6 +185,7 @@ local function makeStateLabelUpdater(stateLabel: TextLabel?): ((newState: string
 	return function(newState: string, _previousState: string?)
 		stateLabel.Text = newState
 		stateLabel.TextColor3 = colors[newState] or defaultColor
+		log:debug(`State changed: {_previousState or "init"} -> {newState}`)
 	end
 end
 
@@ -325,23 +328,22 @@ local function createDetectionRadiusCircle(model: Model, radius: number): Part?
 	disc.Shape = Enum.PartType.Cylinder
 	-- Cylinder axis is along X, so X = thickness, Y/Z = diameter
 	disc.Size = Vector3.new(0.2, diameter, diameter)
-	-- Lay flat on ground: position at ground level, rotate 90° around Z so cylinder faces up
+	-- Lay flat at ground level. Anchored + explicit CFrame update in PostSimulation tick.
 	disc.CFrame = CFrame.new(rootPart.Position.X, 0.15, rootPart.Position.Z) * CFrame.Angles(0, 0, math.rad(90))
-	disc.Anchored = false
+	disc.Anchored = true
 	disc.CanCollide = false
 	disc.CanTouch = false
 	disc.CanQuery = false
+	disc.CastShadow = false
 	disc.Material = Enum.Material.Neon
 	disc.Color = Color3.fromRGB(239, 68, 68) -- Red (matches Chasing state color)
 	disc.Transparency = 0.85
 
-	-- Weld to root part so the disc follows the NPC
-	local weld = Instance.new("WeldConstraint")
-	weld.Part0 = rootPart
-	weld.Part1 = disc
-	weld.Parent = disc
-
 	disc.Parent = Workspace
+
+	log:debug(
+		`Detection disc created: diameter={diameter}, pos=({disc.Position.X}, {disc.Position.Y}, {disc.Position.Z})`
+	)
 
 	return disc
 end
@@ -531,9 +533,58 @@ local WANDER_STATES: NPCStateMachine.StateMap = {
 		onEnter = function(ctx: NPCEntry)
 			local config = GameConfig.NPC.WANDER
 
+			-- Debug: beam from NPC to current wander target + marker sphere
+			local targetMarker: Part? = nil
+			if GameConfig.GAME.DEBUG then
+				local rootPart = ctx.model.PrimaryPart
+				if rootPart then
+					-- Attachment on NPC root (beam start)
+					local npcAttachment = Instance.new("Attachment")
+					npcAttachment.Parent = rootPart
+					ctx.wanderNpcAttachment = npcAttachment
+
+					-- Target marker sphere
+					targetMarker = Instance.new("Part")
+					targetMarker.Name = "WanderTargetMarker"
+					targetMarker.Shape = Enum.PartType.Ball
+					targetMarker.Size = Vector3.new(1, 1, 1)
+					targetMarker.Anchored = true
+					targetMarker.CanCollide = false
+					targetMarker.CanTouch = false
+					targetMarker.CanQuery = false
+					targetMarker.CastShadow = false
+					targetMarker.Material = Enum.Material.Neon
+					targetMarker.Color = Color3.fromRGB(34, 197, 94) -- Green (Wandering state color)
+					targetMarker.Transparency = 0.3
+					targetMarker.Parent = Workspace
+					ctx.wanderTargetMarker = targetMarker
+
+					-- Attachment on target marker (beam end)
+					local targetAttachment = Instance.new("Attachment")
+					targetAttachment.Parent = targetMarker
+
+					-- Beam connecting NPC to target
+					local beam = Instance.new("Beam")
+					beam.Attachment0 = npcAttachment
+					beam.Attachment1 = targetAttachment
+					beam.Width0 = 0.2
+					beam.Width1 = 0.2
+					beam.Color = ColorSequence.new(Color3.fromRGB(34, 197, 94))
+					beam.Transparency = NumberSequence.new(0.5)
+					beam.FaceCamera = true
+					beam.Parent = npcAttachment
+				end
+			end
+
 			ctx.wanderThread = task.spawn(function()
 				while ctx.model and ctx.model:IsDescendantOf(game) do
 					local target = getRandomPointInRadius(config.CENTER, config.RADIUS)
+
+					-- Update debug marker position
+					if targetMarker then
+						targetMarker.Position = target
+					end
+
 					local reached = ctx.pathfinder:moveTo(target)
 
 					if reached then
@@ -550,6 +601,15 @@ local WANDER_STATES: NPCStateMachine.StateMap = {
 			if ctx.wanderThread then
 				task.cancel(ctx.wanderThread)
 				ctx.wanderThread = nil
+			end
+			-- Clean up debug visualization (beam destroyed with npcAttachment)
+			if ctx.wanderNpcAttachment then
+				ctx.wanderNpcAttachment:Destroy()
+				ctx.wanderNpcAttachment = nil
+			end
+			if ctx.wanderTargetMarker then
+				ctx.wanderTargetMarker:Destroy()
+				ctx.wanderTargetMarker = nil
 			end
 			ctx.pathfinder:stop()
 		end,
@@ -602,6 +662,14 @@ function NPCManager.initialize(): ()
 			for _, entry in activeNPCs do
 				if entry.stateMachine then
 					entry.stateMachine:update(dt)
+				end
+				-- Update anchored debug disc to follow NPC position
+				if entry.debugDisc then
+					local rootPart = entry.model.PrimaryPart
+					if rootPart then
+						entry.debugDisc.CFrame = CFrame.new(rootPart.Position.X, 0.15, rootPart.Position.Z)
+							* CFrame.Angles(0, 0, math.rad(90))
+					end
 				end
 			end
 		end)
