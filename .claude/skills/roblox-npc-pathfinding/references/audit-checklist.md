@@ -109,8 +109,14 @@ Use this checklist when reviewing existing pathfinding code. Work through each s
 - [ ] **`hasLineOfSight` excludes target model** — When raycasting to a player for detection, the target character must be in `FilterDescendantsInstances`. Otherwise the ray hits the target's own body parts and LOS always returns false.
   - Severity: CRITICAL (LOS detection completely broken without this)
 
-- [ ] **LOS used to initiate, not maintain** — Chase initiation uses LOS + distance, but chase maintenance uses distance-only. Using LOS for both causes state flicker at wall edges.
-  - Severity: WARNING (cosmetic but disruptive — NPC rapidly switches states)
+- [ ] **LOS memory timer configured** — If `REQUIRE_LOS = true` is used for detection, verify `LOS_MEMORY` is also set. Detection without memory creates a broken UX: walls block detection but not escape. `evaluateChaseTarget` handles the countdown automatically when `config.LOS_MEMORY` is present.
+  - Severity: WARNING (gameplay feel — NPCs feel unfair without this)
+
+- [ ] **`ctx.losLostTimer` cleared in Chasing `onExit`** — The LOS memory timer lives on the shared context. If not reset in `onExit`, stale timer values carry over to the next chase engagement, causing the NPC to give up too early.
+  - Severity: WARNING (subtle bug — only manifests when a player triggers a second chase quickly)
+
+- [ ] **LOS used to initiate, not maintained raw per-frame** — Chase initiation uses LOS + distance, but chase maintenance uses `LOS_MEMORY` countdown via `evaluateChaseTarget`. Using raw LOS per-frame for maintenance causes flicker at wall edges.
+  - Severity: WARNING (cosmetic but disruptive — NPC rapidly switches states without `LOS_MEMORY`)
 
 - [ ] **No `MoveTo(currentPosition)` as stop mechanism** — `MoveTo` to the NPC's own position fires a stale `MoveToFinished(true)` that subsequent `:Wait()` calls catch instantly, causing rapid-fire recomputation loops.
   - Severity: CRITICAL (causes 77+ path recomputes in seconds)

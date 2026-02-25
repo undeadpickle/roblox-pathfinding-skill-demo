@@ -4,16 +4,23 @@
 
 	Provides:
 	- findNearestPlayer: Find the closest player character to a position
+	- detectNearestPlayerInRange: Detect nearest player within radius, optionally requiring LOS
 	- getRandomPointInRadius: Pick a random walkable point, rejecting obstacle geometry
 	- createWaypointMarkers: Debug visualization for patrol/guard waypoints
-	- evaluateChaseTarget: Re-evaluate whether current chase target is still optimal
+	- evaluateChaseTarget: Re-evaluate whether current chase target is still optimal (with LOS memory)
 	- clearCache: Reset obstacle folder cache (call during map reinitialization)
 
 	Place alongside your behavior state modules (e.g., in a behaviors/ folder).
 ]]
 
 local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Logger = require(Shared.Logger)
+
+local log = Logger.new("BehaviorHelpers")
 
 local BehaviorHelpers = {}
 
@@ -44,6 +51,45 @@ function BehaviorHelpers.findNearestPlayer(position: Vector3): Model?
 	end
 
 	return nearest
+end
+
+--- Detect nearest player within detection radius, optionally requiring line of sight.
+--- Returns transitionState if a valid target is found, nil otherwise.
+--- Sets ctx[targetField] to the detected player character on success.
+function BehaviorHelpers.detectNearestPlayerInRange(
+	ctx: any,
+	config: { DETECTION_RADIUS: number, REQUIRE_LOS: boolean? },
+	targetField: string,
+	transitionState: string
+): string?
+	local rootPart = ctx.model.PrimaryPart
+	if not rootPart then
+		return nil
+	end
+
+	local target = BehaviorHelpers.findNearestPlayer(rootPart.Position)
+	if not target then
+		return nil
+	end
+
+	local targetRoot = target:FindFirstChild("HumanoidRootPart")
+	if not targetRoot then
+		return nil
+	end
+
+	local distance = ((targetRoot :: BasePart).Position - rootPart.Position).Magnitude
+	if distance > config.DETECTION_RADIUS then
+		return nil
+	end
+
+	if config.REQUIRE_LOS ~= false then
+		if not ctx.pathfinder:hasLineOfSight((targetRoot :: BasePart).Position, { target }) then
+			return nil
+		end
+	end
+
+	ctx[targetField] = target
+	return transitionState
 end
 
 -- ═══════════════════════════════════════════════════════════
@@ -172,9 +218,16 @@ end
 --- Returns: nextState (string?) — nil to stay in Chasing, lostState if target lost,
 ---          "Chasing" if switching to a closer target (triggers self-transition).
 --- Also updates ctx[targetField] when switching or clearing targets.
+--- When config.LOS_MEMORY is set, checks LOS each tick and drops target after
+--- the NPC loses sight for that many seconds (ctx.losLostTimer tracks elapsed time).
 function BehaviorHelpers.evaluateChaseTarget(
 	ctx: any,
-	config: { DETECTION_RADIUS: number, REEVALUATE_INTERVAL: number },
+	config: {
+		DETECTION_RADIUS: number,
+		REEVALUATE_INTERVAL: number,
+		REQUIRE_LOS: boolean?,
+		LOS_MEMORY: number?,
+	},
 	targetField: string,
 	lostState: string,
 	requireLOS: boolean?
@@ -200,7 +253,38 @@ function BehaviorHelpers.evaluateChaseTarget(
 
 	if not currentTargetValid then
 		ctx[targetField] = nil
+		ctx.losLostTimer = nil
 		return lostState
+	end
+
+	-- LOS memory: if configured, check LOS and count down when sight is lost
+	if config.LOS_MEMORY and config.REQUIRE_LOS then
+		local targetRoot = currentTarget:FindFirstChild("HumanoidRootPart")
+		if targetRoot then
+			local hasLOS = ctx.pathfinder:hasLineOfSight((targetRoot :: BasePart).Position, { currentTarget })
+
+			if hasLOS then
+				if ctx.losLostTimer then
+					log:debug("LOS regained — resetting memory timer")
+				end
+				ctx.losLostTimer = nil
+			else
+				local wasTracking = ctx.losLostTimer ~= nil
+				ctx.losLostTimer = (ctx.losLostTimer or 0) + config.REEVALUATE_INTERVAL
+				if not wasTracking then
+					log:debug(string.format("LOS lost — memory countdown started (%.1fs)", config.LOS_MEMORY))
+				else
+					local remaining = math.max(0, config.LOS_MEMORY - ctx.losLostTimer)
+					log:debug(string.format("LOS still blocked — %.1fs remaining", remaining))
+				end
+				if ctx.losLostTimer >= config.LOS_MEMORY then
+					log:debug("LOS memory expired — dropping target")
+					ctx[targetField] = nil
+					ctx.losLostTimer = nil
+					return lostState
+				end
+			end
+		end
 	end
 
 	-- Check if a closer player is now the better target
@@ -213,10 +297,12 @@ function BehaviorHelpers.evaluateChaseTarget(
 				if requireLOS then
 					if ctx.pathfinder:hasLineOfSight((nearestRoot :: BasePart).Position, { nearest }) then
 						ctx[targetField] = nearest
+						ctx.losLostTimer = nil
 						return "Chasing"
 					end
 				else
 					ctx[targetField] = nearest
+					ctx.losLostTimer = nil
 					return "Chasing"
 				end
 			end

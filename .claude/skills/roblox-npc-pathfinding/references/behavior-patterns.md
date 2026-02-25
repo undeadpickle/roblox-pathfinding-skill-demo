@@ -56,7 +56,7 @@ end)
 
 ## 3. Pattern: Chase (Idle <-> Chasing)
 
-The simplest two-state behavior. NPC scans for players while idle, follows the nearest one when detected, returns to idle when the target escapes.
+The simplest two-state behavior. NPC scans for players while idle, follows the nearest one when detected, returns to idle when the target escapes or LOS memory expires.
 
 ```lua
 local ChaseStates = {
@@ -66,48 +66,31 @@ local ChaseStates = {
         end,
 
         onUpdate = function(ctx, _dt)
-            local rootPart = ctx.model.PrimaryPart
-            if not rootPart then return nil end
-
-            local target = BehaviorHelpers.findNearestPlayer(rootPart.Position)
-            if not target then return nil end
-
-            local targetRoot = target:FindFirstChild("HumanoidRootPart")
-            if not targetRoot then return nil end
-
-            local distance = (targetRoot.Position - rootPart.Position).Magnitude
-            if distance <= DETECTION_RADIUS then
-                ctx.chaseTarget = target
-                return "Chasing"
-            end
-
-            return nil
+            return BehaviorHelpers.detectNearestPlayerInRange(ctx, CONFIG, "chaseTarget", "Chasing")
         end,
     },
 
     Chasing = {
         onEnter = function(ctx)
             ctx.pathfinder:followTarget(ctx.chaseTarget, {
-                recomputeInterval = RECOMPUTE_INTERVAL,
-                arrivalDistance = ARRIVAL_DISTANCE,
-                onTargetLost = function() end,
+                recomputeInterval = CONFIG.RECOMPUTE_INTERVAL,
+                arrivalDistance = CONFIG.ARRIVAL_DISTANCE,
             })
         end,
 
         onUpdate = function(ctx, dt)
             -- Throttle re-evaluation (no need to check every frame)
             ctx.chaseReevalTimer = (ctx.chaseReevalTimer or 0) + dt
-            if ctx.chaseReevalTimer < REEVALUATE_INTERVAL then return nil end
+            if ctx.chaseReevalTimer < CONFIG.REEVALUATE_INTERVAL then return nil end
             ctx.chaseReevalTimer = 0
 
-            return BehaviorHelpers.evaluateChaseTarget(
-                ctx, config, "chaseTarget", "Idle", false
-            )
+            return BehaviorHelpers.evaluateChaseTarget(ctx, CONFIG, "chaseTarget", "Idle", false)
         end,
 
         onExit = function(ctx)
             ctx.pathfinder:stop()
             ctx.chaseReevalTimer = nil
+            ctx.losLostTimer = nil
         end,
     },
 }
@@ -115,11 +98,12 @@ local ChaseStates = {
 
 **Key points:**
 
+- `detectNearestPlayerInRange` handles distance + optional LOS check in one call -- replaces inline detection boilerplate
+- `CONFIG.REQUIRE_LOS = true` blocks detection through walls; `CONFIG.LOS_MEMORY` adds a countdown when LOS is lost during chase
+- `evaluateChaseTarget` checks LOS each reevaluation tick when `LOS_MEMORY` is configured, counting down via `ctx.losLostTimer` until the NPC gives up
 - `followTarget` uses event-driven `MoveToFinished:Connect()` internally -- continuous fluid motion, not polled
-- `evaluateChaseTarget` with `requireLOS = false`: once detected, no LOS check needed to maintain chase (distance-only)
 - Timer-based re-evaluation avoids per-frame distance/player iteration
-- Always `stop()` pathfinder in `onExit` of **both** states -- guarantees clean handoff regardless of which direction the transition goes
-- `onTargetLost` callback is provided but intentionally empty here; the state machine handles target-lost transitions via `evaluateChaseTarget`
+- Always `stop()` pathfinder and clear `losLostTimer` in `onExit`
 
 ## 4. Pattern: Patrol (Patrolling)
 
@@ -190,34 +174,7 @@ local WanderStates = {
 
 ## 6. Pattern: Guard (Guarding <-> Chasing <-> Returning)
 
-The most complex production behavior -- three states with a shared detection helper. Combines random patrol, LOS-triggered pursuit, and return-to-post.
-
-### Shared Detection Helper
-
-```lua
-local function detectPlayerWithLOS(ctx)
-    local rootPart = ctx.model.PrimaryPart
-    if not rootPart then return nil end
-
-    local target = BehaviorHelpers.findNearestPlayer(rootPart.Position)
-    if not target then return nil end
-
-    local targetRoot = target:FindFirstChild("HumanoidRootPart")
-    if not targetRoot then return nil end
-
-    local distance = (targetRoot.Position - rootPart.Position).Magnitude
-    if distance <= DETECTION_RADIUS then
-        if ctx.pathfinder:hasLineOfSight(targetRoot.Position, { target }) then
-            ctx.guardTarget = target
-            return "Chasing"
-        end
-    end
-
-    return nil
-end
-```
-
-### State Definitions
+The most complex production behavior -- three states using shared detection helpers. Combines random patrol, LOS-triggered pursuit with memory timer, and return-to-post.
 
 ```lua
 local GuardStates = {
@@ -226,30 +183,24 @@ local GuardStates = {
             local lastIndex = ctx.guardLastWaypointIndex or 0
             ctx.guardPatrolThread = task.spawn(function()
                 while ctx.model and ctx.model:IsDescendantOf(game) do
-                    -- Pick random waypoint, excluding the last one visited
                     local candidates = {}
-                    for i = 1, #WAYPOINTS do
-                        if i ~= lastIndex then
-                            table.insert(candidates, i)
-                        end
+                    for i = 1, #CONFIG.WAYPOINTS do
+                        if i ~= lastIndex then table.insert(candidates, i) end
                     end
                     local nextIndex = candidates[math.random(1, #candidates)]
                     lastIndex = nextIndex
                     ctx.guardLastWaypointIndex = nextIndex
-
-                    ctx.pathfinder:moveTo(WAYPOINTS[nextIndex])
-                    task.wait(PATROL_PAUSE)
+                    ctx.pathfinder:moveTo(CONFIG.WAYPOINTS[nextIndex])
+                    task.wait(CONFIG.PATROL_PAUSE)
                 end
             end)
         end,
 
         onUpdate = function(ctx, dt)
-            -- Throttle detection (no need to raycast every frame)
             ctx.guardDetectTimer = (ctx.guardDetectTimer or 0) + dt
-            if ctx.guardDetectTimer < DETECT_INTERVAL then return nil end
+            if ctx.guardDetectTimer < CONFIG.DETECT_INTERVAL then return nil end
             ctx.guardDetectTimer = 0
-
-            return detectPlayerWithLOS(ctx)
+            return BehaviorHelpers.detectNearestPlayerInRange(ctx, CONFIG, "guardTarget", "Chasing")
         end,
 
         onExit = function(ctx)
@@ -265,74 +216,56 @@ local GuardStates = {
     Chasing = {
         onEnter = function(ctx)
             ctx.pathfinder:followTarget(ctx.guardTarget, {
-                recomputeInterval = RECOMPUTE_INTERVAL,
-                arrivalDistance = ARRIVAL_DISTANCE,
+                recomputeInterval = CONFIG.RECOMPUTE_INTERVAL,
+                arrivalDistance = CONFIG.ARRIVAL_DISTANCE,
             })
         end,
 
         onUpdate = function(ctx, dt)
             ctx.guardReevalTimer = (ctx.guardReevalTimer or 0) + dt
-            if ctx.guardReevalTimer < REEVALUATE_INTERVAL then return nil end
+            if ctx.guardReevalTimer < CONFIG.REEVALUATE_INTERVAL then return nil end
             ctx.guardReevalTimer = 0
-
-            -- Distance-only to maintain chase (no LOS -- prevents flicker at wall edges)
-            -- LOS required only to SWITCH to a closer target
-            return BehaviorHelpers.evaluateChaseTarget(
-                ctx, config, "guardTarget", "Returning", true
-            )
+            -- LOS_MEMORY provides countdown when sight is lost; requireLOS=true for target switching
+            return BehaviorHelpers.evaluateChaseTarget(ctx, CONFIG, "guardTarget", "Returning", true)
         end,
 
         onExit = function(ctx)
             ctx.pathfinder:stop()
             ctx.guardReevalTimer = nil
+            ctx.losLostTimer = nil
         end,
     },
 
     Returning = {
         onEnter = function(ctx)
             ctx.guardReachedWaypoint = false
-
             local rootPart = ctx.model.PrimaryPart
-            if not rootPart then
-                ctx.guardReachedWaypoint = true
-                return
-            end
+            if not rootPart then ctx.guardReachedWaypoint = true; return end
 
-            -- Find nearest waypoint to return to
-            local nearestIndex = 1
-            local nearestDist = math.huge
-            for i, wp in WAYPOINTS do
+            local nearestIndex, nearestDist = 1, math.huge
+            for i, wp in CONFIG.WAYPOINTS do
                 local dist = (wp - rootPart.Position).Magnitude
-                if dist < nearestDist then
-                    nearestDist = dist
-                    nearestIndex = i
-                end
+                if dist < nearestDist then nearestDist = dist; nearestIndex = i end
             end
-
             ctx.guardLastWaypointIndex = nearestIndex
 
             ctx.guardPatrolThread = task.spawn(function()
-                ctx.pathfinder:moveTo(WAYPOINTS[nearestIndex])
+                ctx.pathfinder:moveTo(CONFIG.WAYPOINTS[nearestIndex])
                 ctx.guardReachedWaypoint = true
             end)
         end,
 
         onUpdate = function(ctx, dt)
             if ctx.guardReachedWaypoint then
-                -- Minimum dwell so "Returning" is observable in debug panel
                 ctx.guardReturnDwell = (ctx.guardReturnDwell or 0) + dt
-                if ctx.guardReturnDwell >= RETURN_DWELL then
-                    return "Guarding"
-                end
+                if ctx.guardReturnDwell >= CONFIG.RETURN_DWELL then return "Guarding" end
                 return nil
             end
 
-            -- Can detect and chase during return
             ctx.guardDetectTimer = (ctx.guardDetectTimer or 0) + dt
-            if ctx.guardDetectTimer < DETECT_INTERVAL then return nil end
+            if ctx.guardDetectTimer < CONFIG.DETECT_INTERVAL then return nil end
             ctx.guardDetectTimer = 0
-
-            return detectPlayerWithLOS(ctx)
+            return BehaviorHelpers.detectNearestPlayerInRange(ctx, CONFIG, "guardTarget", "Chasing")
         end,
 
         onExit = function(ctx)
@@ -351,13 +284,14 @@ local GuardStates = {
 
 **Key points:**
 
-- **LOS detection strategy:** Use LOS to *initiate* chase (Guarding/Returning -> Chasing), but distance-only to *maintain* chase (Chasing `onUpdate`). LOS flickers at wall edges because the player model partially peeks out frame-to-frame. Distance is stable once chase has begun.
-- **`hasLineOfSight(targetPos, { target })`** -- the second argument excludes the target player's character from the raycast. Without this, the ray hits the target's own body parts (legs, torso) before reaching `HumanoidRootPart` position.
-- **Guard returns to nearest waypoint**, not a fixed home position. This prevents the guard from awkwardly running across its entire patrol zone after a chase.
-- **`RETURN_DWELL` minimum time** -- without this, the Returning state completes in 1-2 frames and is invisible in debug panels. The dwell makes the state observable.
-- **Detection during return** -- the guard can interrupt its return path to chase a newly detected player, making it feel reactive rather than robotic.
-- **Random waypoint selection excludes last visited** -- prevents the guard from immediately turning around, which looks unnatural.
-- **Guarding uses a spawned thread** (like Wander), not `patrol()` -- random order between fixed waypoints is a different movement pattern than sequential patrol.
+- **`detectNearestPlayerInRange`** replaces the old local `detectPlayerWithLOS` helper — shared utility handles distance + `REQUIRE_LOS` check in one call. Used by both Guarding and Returning.
+- **LOS memory strategy:** `REQUIRE_LOS = true` blocks initial detection through walls. `LOS_MEMORY` (seconds) lets `evaluateChaseTarget` count down via `ctx.losLostTimer` when sight is lost during chase — NPC gives up after N seconds without regaining LOS. This completes the stealth loop: walls block detection AND allow escape.
+- **`hasLineOfSight(targetPos, { target })`** -- the second argument excludes the target player's character from the raycast. Without this, the ray hits the target's own body parts and LOS always returns false.
+- **Guard returns to nearest waypoint**, not a fixed home. Prevents awkward cross-zone sprinting after a chase.
+- **`RETURN_DWELL` minimum time** -- without this, Returning completes in 1-2 frames and is invisible in debug panels.
+- **Detection during return** -- guard can interrupt its return to chase a newly detected player.
+- **Random waypoint selection excludes last visited** -- prevents back-and-forth.
+- **Always clear `losLostTimer` in Chasing `onExit`** -- timer lives on shared context, must be reset between chases.
 
 ## 7. BehaviorHelpers API
 
@@ -370,6 +304,23 @@ Iterates all players via `Players:GetPlayers()`, returns the nearest character m
 ```lua
 local target = BehaviorHelpers.findNearestPlayer(rootPart.Position)
 if not target then return nil end
+```
+
+### detectNearestPlayerInRange(ctx, config, targetField, transitionState): string?
+
+Combined detection helper — checks distance and optional LOS in one call. Use this for `onUpdate` in Idle/Guarding/Returning states instead of inline detection boilerplate.
+
+- Finds nearest player via `findNearestPlayer`
+- Checks distance against `config.DETECTION_RADIUS`
+- If `config.REQUIRE_LOS ~= false`, raycasts via `ctx.pathfinder:hasLineOfSight()` (excludes target model)
+- On success: sets `ctx[targetField] = target`, returns `transitionState`
+- On fail: returns `nil`
+
+```lua
+-- In Idle onUpdate:
+return BehaviorHelpers.detectNearestPlayerInRange(ctx, CONFIG, "chaseTarget", "Chasing")
+
+-- CONFIG must have: DETECTION_RADIUS (number), REQUIRE_LOS (boolean?, default true)
 ```
 
 ### getRandomPointInRadius(center: Vector3, radius: number): Vector3
@@ -406,34 +357,38 @@ end
 
 ### evaluateChaseTarget(ctx, config, targetField, lostState, requireLOS?): string?
 
-Core re-evaluation logic shared by all chase-capable behaviors. Call from `onUpdate` of a Chasing state.
+Core re-evaluation logic shared by all chase-capable behaviors. Call from `onUpdate` of a Chasing state on a throttled timer (not every frame).
 
 **Parameters:**
 - `ctx` -- the shared context table
-- `config` -- table with `DETECTION_RADIUS` field (used for range check)
+- `config` -- table with `DETECTION_RADIUS`, `REEVALUATE_INTERVAL`, and optionally `REQUIRE_LOS` + `LOS_MEMORY`
 - `targetField` -- string key on ctx where the current target is stored (e.g., `"chaseTarget"`, `"guardTarget"`)
 - `lostState` -- state name to transition to when the target is lost (e.g., `"Idle"`, `"Returning"`)
 - `requireLOS` -- if true, only switches to a closer target when LOS check passes
 
 **Returns:**
-- `nil` -- current target is still the best, stay in Chasing
-- `lostState` -- current target invalid (left game, out of range), clears `ctx[targetField]`
+- `nil` -- current target is still valid, stay in Chasing
+- `lostState` -- current target invalid (left game, out of range, or LOS memory expired), clears `ctx[targetField]`
 - `"Chasing"` -- switching to a closer player (self-transition: triggers `onExit` then `onEnter` with new target)
 
 **Logic flow:**
 1. Validate current target: still in game? Still within `DETECTION_RADIUS`?
-2. If invalid -> return `lostState`, set `ctx[targetField] = nil`
-3. Find nearest player. If a different, closer player exists within range:
+2. If invalid → return `lostState`, clear `ctx[targetField]` and `ctx.losLostTimer`
+3. If `config.LOS_MEMORY` and `config.REQUIRE_LOS` are set: check LOS this tick
+   - LOS regained → clear `ctx.losLostTimer`
+   - LOS lost → increment `ctx.losLostTimer` by `REEVALUATE_INTERVAL`
+   - Timer ≥ `LOS_MEMORY` → return `lostState` (NPC gives up)
+4. Find nearest player. If a different, closer player exists within range:
    - If `requireLOS` is true, check LOS before switching
-   - If check passes, set `ctx[targetField]` to new target, return `"Chasing"` (self-transition)
-4. Otherwise return `nil` (keep chasing current target)
+   - On success: clear `ctx.losLostTimer`, set new target, return `"Chasing"` (self-transition)
+5. Otherwise return `nil` (keep chasing current target)
 
 ```lua
--- Chase NPC: no LOS needed to maintain chase
-return BehaviorHelpers.evaluateChaseTarget(ctx, config, "chaseTarget", "Idle", false)
+-- Chase NPC: LOS_MEMORY countdown, no LOS required for target switching
+return BehaviorHelpers.evaluateChaseTarget(ctx, CONFIG, "chaseTarget", "Idle", false)
 
--- Guard NPC: LOS required to switch targets (distance-only to maintain current)
-return BehaviorHelpers.evaluateChaseTarget(ctx, config, "guardTarget", "Returning", true)
+-- Guard NPC: LOS_MEMORY countdown, LOS required to switch to a new target
+return BehaviorHelpers.evaluateChaseTarget(ctx, CONFIG, "guardTarget", "Returning", true)
 ```
 
 ### clearCache(): ()

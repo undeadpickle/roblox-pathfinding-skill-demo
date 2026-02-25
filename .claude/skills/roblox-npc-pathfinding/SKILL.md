@@ -3,7 +3,7 @@ name: roblox-npc-pathfinding
 description: "Production-grade NPC pathfinding for Roblox using PathfindingService + state machines. Interactive wizard generates NPCPathfinder, state machine, and behavior code. Use when: adding NPC pathfinding, creating chase/patrol/wander/guard NPCs, fixing NPC movement, auditing pathfinding code, or building NPC AI. Applies to humanoid character models. Supports Luau."
 metadata:
   author: custom
-  version: 2.0.0
+  version: 2.1.0
   category: game-development
   tags: [roblox, luau, npc, pathfinding, ai, game-dev, state-machine]
 ---
@@ -24,7 +24,7 @@ This skill generates a 3-layer NPC pathfinding system:
 
 | Module | Role |
 |--------|------|
-| `BehaviorHelpers` (`assets/behavior-helpers.luau`) | Shared utilities: `findNearestPlayer`, `getRandomPointInRadius`, `evaluateChaseTarget`, `createWaypointMarkers`, `clearCache` |
+| `BehaviorHelpers` (`assets/behavior-helpers.luau`) | Shared utilities: `findNearestPlayer`, `detectNearestPlayerInRange`, `getRandomPointInRadius`, `evaluateChaseTarget`, `createWaypointMarkers`, `clearCache` |
 | `NPCManager` (documented pattern, not an asset) | Centralized spawning, state machine wiring, tick loop, lifecycle cleanup. Too project-specific to ship as a generic asset. |
 
 **Data flow:** NPCManager spawns models, creates pathfinders, creates state machines with behavior state maps, and runs a single `PostSimulation` tick loop. Each tick calls `stateMachine:update(dt)`. State hooks call pathfinder methods (`followTarget`, `patrol`, `moveTo`, `stop`) to drive movement.
@@ -60,7 +60,9 @@ If the scenario is unclear from context, ask:
 - Detection radius? (default: 30 studs)
 - Walk speed? (default: 16)
 - What happens at arrival? (stop, attack callback, orbit target)
-- Should it give up if target escapes? (distance threshold or never)
+- Should walls block detection? (`REQUIRE_LOS = true` recommended, default: true)
+- Should it give up if target hides behind a wall? (`LOS_MEMORY` seconds, default: 3; nil = chase forever once spotted)
+- Should it give up if target escapes detection range? (distance threshold or never)
 
 **For Patrol:**
 - How many waypoints? (provide Vector3 positions or describe layout)
@@ -76,6 +78,8 @@ If the scenario is unclear from context, ask:
 **For Guard:**
 - Detection method? (distance + LOS recommended, distance-only simpler)
 - Detection radius? (default: 25 studs)
+- Should walls block detection? (`REQUIRE_LOS = true` recommended, default: true)
+- How long should it chase after losing sight? (`LOS_MEMORY` seconds, default: 5; nil = chase forever)
 - Waypoints or random patrol within radius?
 - How far will it chase before returning to post?
 - Walk speed? (default: 12)
@@ -164,12 +168,17 @@ Two states. Idle scans for players. Chasing follows with `followTarget`.
 
 local NPCStateMachine = require(path.to.NPCStateMachine)
 local BehaviorHelpers = require(path.to.BehaviorHelpers)
+local GameConfig = require(path.to.GameConfig)
 
--- WIZARD VALUES: substitute from user answers
-local DETECTION_RADIUS = 30  -- studs
-local RECOMPUTE_INTERVAL = 0.5  -- seconds
-local ARRIVAL_DISTANCE = 5  -- studs
-local REEVALUATE_INTERVAL = 3  -- seconds between target re-evaluation
+-- WIZARD VALUES: substitute from user answers (or read from GameConfig)
+local CONFIG = {
+    DETECTION_RADIUS = 30,        -- studs
+    RECOMPUTE_INTERVAL = 0.5,     -- seconds
+    ARRIVAL_DISTANCE = 5,         -- studs
+    REEVALUATE_INTERVAL = 3,      -- seconds between target re-evaluation
+    REQUIRE_LOS = true,           -- walls block detection (set false for omniscient)
+    LOS_MEMORY = 3,               -- seconds to chase after losing sight (nil = chase forever)
+}
 
 local ChaseStates: NPCStateMachine.StateMap = {
     Idle = {
@@ -178,28 +187,7 @@ local ChaseStates: NPCStateMachine.StateMap = {
         end,
 
         onUpdate = function(ctx: any, _dt: number): string?
-            local rootPart = ctx.model.PrimaryPart
-            if not rootPart then
-                return nil
-            end
-
-            local target = BehaviorHelpers.findNearestPlayer(rootPart.Position)
-            if not target then
-                return nil
-            end
-
-            local targetRoot = target:FindFirstChild("HumanoidRootPart")
-            if not targetRoot then
-                return nil
-            end
-
-            local distance = ((targetRoot :: BasePart).Position - rootPart.Position).Magnitude
-            if distance <= DETECTION_RADIUS then
-                ctx.chaseTarget = target
-                return "Chasing"
-            end
-
-            return nil
+            return BehaviorHelpers.detectNearestPlayerInRange(ctx, CONFIG, "chaseTarget", "Chasing")
         end,
     },
 
@@ -211,8 +199,8 @@ local ChaseStates: NPCStateMachine.StateMap = {
             end
 
             ctx.pathfinder:followTarget(target, {
-                recomputeInterval = RECOMPUTE_INTERVAL,
-                arrivalDistance = ARRIVAL_DISTANCE,
+                recomputeInterval = CONFIG.RECOMPUTE_INTERVAL,
+                arrivalDistance = CONFIG.ARRIVAL_DISTANCE,
                 -- onArrival = function(target) end,  -- WIZARD: attack callback here
                 -- onTargetLost = function() end,     -- WIZARD: optional lost callback
             })
@@ -221,24 +209,18 @@ local ChaseStates: NPCStateMachine.StateMap = {
         onUpdate = function(ctx: any, dt: number): string?
             -- Throttle re-evaluation (don't check every frame)
             ctx.chaseReevalTimer = (ctx.chaseReevalTimer or 0) + dt
-            if ctx.chaseReevalTimer < REEVALUATE_INTERVAL then
+            if ctx.chaseReevalTimer < CONFIG.REEVALUATE_INTERVAL then
                 return nil
             end
             ctx.chaseReevalTimer = 0
 
-            -- requireLOS=false: once detected, don't need LOS to maintain chase
-            return BehaviorHelpers.evaluateChaseTarget(
-                ctx,
-                { DETECTION_RADIUS = DETECTION_RADIUS, REEVALUATE_INTERVAL = REEVALUATE_INTERVAL },
-                "chaseTarget",
-                "Idle",       -- lostState: go back to scanning
-                false         -- requireLOS: false for maintaining chase
-            )
+            return BehaviorHelpers.evaluateChaseTarget(ctx, CONFIG, "chaseTarget", "Idle", false)
         end,
 
         onExit = function(ctx: any)
             ctx.pathfinder:stop()
             ctx.chaseReevalTimer = nil
+            ctx.losLostTimer = nil
         end,
     },
 }
@@ -247,11 +229,12 @@ return ChaseStates
 ```
 
 **Key patterns:**
-- Timer-based re-evaluation (`REEVALUATE_INTERVAL`) avoids per-frame cost
-- `evaluateChaseTarget` handles: current target still valid? Closer player available? Returns "Idle" if target lost, "Chasing" for self-transition on target switch, nil to stay
+- `detectNearestPlayerInRange` handles distance + optional LOS check in one call — replaces inline detection boilerplate
+- `REQUIRE_LOS = true` blocks detection through walls; `LOS_MEMORY` adds a countdown timer when LOS is lost during chase
+- `evaluateChaseTarget` handles: current target still valid? LOS still held (if `LOS_MEMORY` configured)? Closer player available? Returns "Idle" if target lost or LOS memory expires, "Chasing" for target switch, nil to stay
 - `followTarget` uses event-driven waypoint advancement via `MoveToFinished:Connect()` -- never a blocking compute-traverse-wait loop
-- `requireLOS=false` for maintaining chase (once detected, distance-only to prevent LOS flicker at wall edges)
-- Always stop pathfinder in `onExit`
+- Timer-based re-evaluation (`REEVALUATE_INTERVAL`) avoids per-frame cost
+- Always stop pathfinder and clear `losLostTimer` in `onExit`
 
 ### Template: Patrol (Patrolling)
 
@@ -366,51 +349,27 @@ Most complex -- 3 states with LOS-based detection.
 
 local NPCStateMachine = require(path.to.NPCStateMachine)
 local BehaviorHelpers = require(path.to.BehaviorHelpers)
+local GameConfig = require(path.to.GameConfig)
 
--- WIZARD VALUES: substitute from user answers
-local DETECTION_RADIUS = 25   -- studs
-local RECOMPUTE_INTERVAL = 0.5
-local ARRIVAL_DISTANCE = 5
-local REEVALUATE_INTERVAL = 1
-local DETECT_INTERVAL = 0.2   -- seconds between detection raycasts
-local PATROL_PAUSE = 1.5      -- seconds between random waypoints
-local RETURN_DWELL = 0.8      -- minimum seconds in Returning before transitioning
-local WAYPOINTS = {
-    Vector3.new(10, 5, 25),
-    Vector3.new(15, 5, 45),
-    Vector3.new(0, 5, 50),
-    Vector3.new(-15, 5, 45),
-    Vector3.new(-10, 5, 25),
+-- WIZARD VALUES: substitute from user answers (or read from GameConfig)
+local CONFIG = {
+    DETECTION_RADIUS = 25,        -- studs
+    RECOMPUTE_INTERVAL = 0.5,
+    ARRIVAL_DISTANCE = 5,
+    REEVALUATE_INTERVAL = 1,
+    DETECT_INTERVAL = 0.2,        -- seconds between detection raycasts
+    PATROL_PAUSE = 1.5,           -- seconds between random waypoints
+    RETURN_DWELL = 0.8,           -- minimum seconds in Returning before transitioning
+    REQUIRE_LOS = true,           -- walls block detection (set false for omniscient)
+    LOS_MEMORY = 5,               -- seconds to chase after losing sight (nil = chase forever)
+    WAYPOINTS = {
+        Vector3.new(10, 5, 25),
+        Vector3.new(15, 5, 45),
+        Vector3.new(0, 5, 50),
+        Vector3.new(-15, 5, 45),
+        Vector3.new(-10, 5, 25),
+    },
 }
-
---- Detect nearest player within range + LOS. Shared by Guarding and Returning states.
-local function detectPlayerWithLOS(ctx: any): string?
-    local rootPart = ctx.model.PrimaryPart
-    if not rootPart then
-        return nil
-    end
-
-    local target = BehaviorHelpers.findNearestPlayer(rootPart.Position)
-    if not target then
-        return nil
-    end
-
-    local targetRoot = target:FindFirstChild("HumanoidRootPart")
-    if not targetRoot then
-        return nil
-    end
-
-    local distance = ((targetRoot :: BasePart).Position - rootPart.Position).Magnitude
-    if distance <= DETECTION_RADIUS then
-        -- Require LOS to INITIATE chase (prevents chasing through walls)
-        if ctx.pathfinder:hasLineOfSight((targetRoot :: BasePart).Position, { target }) then
-            ctx.guardTarget = target
-            return "Chasing"
-        end
-    end
-
-    return nil
-end
 
 local GuardStates: NPCStateMachine.StateMap = {
     Guarding = {
@@ -421,7 +380,7 @@ local GuardStates: NPCStateMachine.StateMap = {
                 while ctx.model and ctx.model:IsDescendantOf(game) do
                     -- Pick random waypoint, excluding the last one visited
                     local candidates = {}
-                    for i = 1, #WAYPOINTS do
+                    for i = 1, #CONFIG.WAYPOINTS do
                         if i ~= lastIndex then
                             table.insert(candidates, i)
                         end
@@ -430,8 +389,8 @@ local GuardStates: NPCStateMachine.StateMap = {
                     lastIndex = nextIndex
                     ctx.guardLastWaypointIndex = nextIndex
 
-                    ctx.pathfinder:moveTo(WAYPOINTS[nextIndex])
-                    task.wait(PATROL_PAUSE)
+                    ctx.pathfinder:moveTo(CONFIG.WAYPOINTS[nextIndex])
+                    task.wait(CONFIG.PATROL_PAUSE)
                 end
             end)
         end,
@@ -439,12 +398,12 @@ local GuardStates: NPCStateMachine.StateMap = {
         onUpdate = function(ctx: any, dt: number): string?
             -- Throttle detection raycasts
             ctx.guardDetectTimer = (ctx.guardDetectTimer or 0) + dt
-            if ctx.guardDetectTimer < DETECT_INTERVAL then
+            if ctx.guardDetectTimer < CONFIG.DETECT_INTERVAL then
                 return nil
             end
             ctx.guardDetectTimer = 0
 
-            return detectPlayerWithLOS(ctx)
+            return BehaviorHelpers.detectNearestPlayerInRange(ctx, CONFIG, "guardTarget", "Chasing")
         end,
 
         onExit = function(ctx: any)
@@ -465,32 +424,25 @@ local GuardStates: NPCStateMachine.StateMap = {
             end
 
             ctx.pathfinder:followTarget(target, {
-                recomputeInterval = RECOMPUTE_INTERVAL,
-                arrivalDistance = ARRIVAL_DISTANCE,
+                recomputeInterval = CONFIG.RECOMPUTE_INTERVAL,
+                arrivalDistance = CONFIG.ARRIVAL_DISTANCE,
             })
         end,
 
         onUpdate = function(ctx: any, dt: number): string?
             ctx.guardReevalTimer = (ctx.guardReevalTimer or 0) + dt
-            if ctx.guardReevalTimer < REEVALUATE_INTERVAL then
+            if ctx.guardReevalTimer < CONFIG.REEVALUATE_INTERVAL then
                 return nil
             end
             ctx.guardReevalTimer = 0
 
-            -- Distance-only to MAINTAIN chase (no LOS flicker at wall edges)
-            -- LOS required to SWITCH to a closer target
-            return BehaviorHelpers.evaluateChaseTarget(
-                ctx,
-                { DETECTION_RADIUS = DETECTION_RADIUS, REEVALUATE_INTERVAL = REEVALUATE_INTERVAL },
-                "guardTarget",
-                "Returning",  -- lostState: return to post when target escapes
-                true          -- requireLOS: for switching to a new target
-            )
+            return BehaviorHelpers.evaluateChaseTarget(ctx, CONFIG, "guardTarget", "Returning", true)
         end,
 
         onExit = function(ctx: any)
             ctx.pathfinder:stop()
             ctx.guardReevalTimer = nil
+            ctx.losLostTimer = nil
         end,
     },
 
@@ -507,7 +459,7 @@ local GuardStates: NPCStateMachine.StateMap = {
             -- Find nearest waypoint to return to
             local nearestIndex = 1
             local nearestDist = math.huge
-            for i, wp in WAYPOINTS do
+            for i, wp in CONFIG.WAYPOINTS do
                 local dist = (wp - rootPart.Position).Magnitude
                 if dist < nearestDist then
                     nearestDist = dist
@@ -518,7 +470,7 @@ local GuardStates: NPCStateMachine.StateMap = {
             ctx.guardLastWaypointIndex = nearestIndex
 
             ctx.guardPatrolThread = task.spawn(function()
-                ctx.pathfinder:moveTo(WAYPOINTS[nearestIndex])
+                ctx.pathfinder:moveTo(CONFIG.WAYPOINTS[nearestIndex])
                 ctx.guardReachedWaypoint = true
             end)
         end,
@@ -527,7 +479,7 @@ local GuardStates: NPCStateMachine.StateMap = {
             if ctx.guardReachedWaypoint then
                 -- Minimum dwell time before transitioning back to Guarding
                 ctx.guardReturnDwell = (ctx.guardReturnDwell or 0) + dt
-                if ctx.guardReturnDwell >= RETURN_DWELL then
+                if ctx.guardReturnDwell >= CONFIG.RETURN_DWELL then
                     return "Guarding"
                 end
                 return nil
@@ -535,12 +487,12 @@ local GuardStates: NPCStateMachine.StateMap = {
 
             -- Can detect and chase players during return
             ctx.guardDetectTimer = (ctx.guardDetectTimer or 0) + dt
-            if ctx.guardDetectTimer < DETECT_INTERVAL then
+            if ctx.guardDetectTimer < CONFIG.DETECT_INTERVAL then
                 return nil
             end
             ctx.guardDetectTimer = 0
 
-            return detectPlayerWithLOS(ctx)
+            return BehaviorHelpers.detectNearestPlayerInRange(ctx, CONFIG, "guardTarget", "Chasing")
         end,
 
         onExit = function(ctx: any)
@@ -560,12 +512,14 @@ return GuardStates
 ```
 
 **Key patterns:**
-- `detectPlayerWithLOS()` is a local helper shared by Guarding and Returning states
-- Require LOS to **initiate** chase (prevents chasing through walls), distance-only to **maintain** chase (prevents LOS flicker at wall edges)
+- `detectNearestPlayerInRange` replaces the local `detectPlayerWithLOS` helper — shared utility handles distance + optional LOS check
+- `REQUIRE_LOS = true` blocks detection through walls; `LOS_MEMORY` adds a countdown timer when LOS is lost during chase — NPC gives up after N seconds without regaining sight
+- `evaluateChaseTarget` with `LOS_MEMORY` config handles the full stealth loop: detect → pursue → lose sight → countdown → disengage
 - Random waypoint patrol skips the last visited index to avoid back-and-forth
 - Returning finds the nearest waypoint, not always the same one
 - `RETURN_DWELL` minimum time makes the "Returning" state observable in debug tools
 - Can interrupt return to chase if a player is detected
+- Always clear `losLostTimer` in Chasing `onExit`
 
 ### Template: Custom
 
@@ -705,7 +659,9 @@ When generating any pathfinding code, ALWAYS apply these rules. These are derive
 ### LOS Detection
 
 - **`hasLineOfSight` MUST exclude the target model** in `FilterDescendantsInstances`. Without this, the ray hits the target player's own body parts (legs, torso) before reaching HumanoidRootPart position, making LOS always return false.
-- **Require LOS to INITIATE chase, distance-only to MAINTAIN chase.** Using LOS for both causes flicker at wall edges where the ray alternates between hitting and missing geometry each frame.
+- **Use `detectNearestPlayerInRange` for initial detection.** Shared helper handles distance + optional LOS check (`REQUIRE_LOS` config). Replaces inline detection boilerplate in both Chase and Guard states.
+- **Use `LOS_MEMORY` for chase maintenance, not raw LOS checks.** Raw LOS per-frame causes flicker at wall edges. `LOS_MEMORY` provides a configurable countdown (e.g., 3-5 seconds) after LOS is lost before the NPC gives up. This completes the stealth loop: walls block detection AND allow escape.
+- **Always clear `ctx.losLostTimer = nil` in Chasing `onExit`.** The timer is managed by `evaluateChaseTarget` but lives on the shared context. If the state exits for any reason (target left, range exceeded), the timer must be reset so it doesn't carry over to the next chase.
 
 ### Humanoid States
 
@@ -753,7 +709,8 @@ Match symptoms to `references/common-pitfalls.md`. Quick-reference symptom map:
 | NPC zig-zags | `PathfindingUseImprovedSearch` not enabled, `AgentRadius` too small for model |
 | Path recomputes rapidly | `MoveTo(currentPosition)` used as stop mechanism fires stale `MoveToFinished(true)` |
 | LOS always false | Target model not excluded from raycast `FilterDescendantsInstances` |
-| LOS flickers | Using LOS for both initiate AND maintain chase -- use distance-only for maintain |
+| LOS flickers | Using raw LOS for chase maintenance -- use `LOS_MEMORY` timer instead |
+| NPC chases forever after losing sight | `LOS_MEMORY` not configured, or `REQUIRE_LOS` is false during chase maintenance |
 | NPC jitters near waypoints | Network ownership bouncing, waypoint spacing too small |
 | Path returns NoPath | Destination unreachable on navmesh, agent too large for gap, geometry not in Workspace |
 | `stop()` kills calling thread | Calling `stop()` from inside a thread that `stop()` cancels -- use `_resetMovement()` instead |

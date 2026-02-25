@@ -171,11 +171,22 @@ Before diagnosing any pathfinding issue, enable these visualizations in Roblox S
    ```
    The `hasLineOfSight(targetPos, excludeModels?)` method in the asset module accepts an optional `excludeModels` array for this purpose.
 
+### NPC chases forever after player hides behind a wall
+
+**Causes:**
+1. **`LOS_MEMORY` not configured** — Detection uses `REQUIRE_LOS = true` so walls block the initial spot, but chase maintenance has no LOS check. Once detected, the NPC chases regardless of walls until the player leaves the detection radius. This creates a broken mental model: walls matter for detection but not escape.
+   - **Fix:** Add `LOS_MEMORY` to the NPC config (e.g., `LOS_MEMORY = 3` for chase, `LOS_MEMORY = 5` for guard). `evaluateChaseTarget` will count down `ctx.losLostTimer` each reevaluation tick when LOS is lost, and drop the target when the timer expires. This completes the stealth loop: detect → pursue → lose sight → countdown → disengage.
+   ```lua
+   -- In GameConfig or local CONFIG:
+   LOS_MEMORY = 3,  -- seconds before giving up (nil = chase forever)
+   REQUIRE_LOS = true,  -- must be true for LOS_MEMORY to activate
+   ```
+
 ### Guard NPC flickers between chase and return states at wall edges
 
 **Causes:**
-1. **Using LOS to maintain chase, not just to initiate it** — When a player peeks around a wall corner, LOS alternates true/false frame-to-frame as the player model partially occludes. If the Chasing → Returning transition checks LOS, the NPC rapidly switches states (chase → return → chase → return).
-   - **Fix:** Use LOS + distance to _initiate_ a chase (enter Chasing state), but use distance-only to _maintain_ it (stay in Chasing / transition to Returning). The player must move out of the detection radius to break the chase, not just duck behind a wall.
+1. **Using raw LOS per-frame to maintain chase** — When a player peeks around a wall corner, LOS alternates true/false each frame as the player model partially occludes. If the Chasing → Returning transition triggers on LOS loss, the NPC rapidly switches states (chase → return → chase → return).
+   - **Fix:** Use `LOS_MEMORY` timer instead of raw LOS for chase maintenance. The timer accumulates only on throttled reevaluation ticks (not every frame), and the NPC only gives up after the full countdown expires — not on transient LOS breaks. Set `REQUIRE_LOS = true` for detection, and let `evaluateChaseTarget` manage the countdown.
 
 ### Debug visual toggles reset when NPC re-enters a state
 
