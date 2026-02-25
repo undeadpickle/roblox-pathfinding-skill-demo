@@ -1,66 +1,59 @@
 # Session Handoff
 
-> Updated: 2026-02-25 (Session 18)
-> Focus: Migrate obstacles from runtime generation to permanent Studio placement
+> Updated: 2026-02-25 (Session 18 → 19)
+> Focus: Refactor from demo to toolkit — make NPC behaviors assignable to any humanoid
 
 ---
 
-## What Got Done
+## What Got Done (Session 18)
 
 ### Obstacle Migration to Studio
-Moved all 24 obstacle parts (16 walls/blocks + 8 staircase steps) from runtime config-driven generation to permanent Studio-placed instances via MCP `run_code`. Idempotent script destroys and recreates `Workspace.Obstacles` folder.
+Moved all 24 obstacle parts from runtime config-driven generation to permanent Studio-placed instances via MCP `run_code`. Deleted MapSetup module, GameConfig.MAP config, and all related init code. ~200 lines removed.
 
-### Code Cleanup
-- **Deleted** `src/server/modules/MapSetup.luau` — runtime obstacle generator (76 lines)
-- **Removed** `GameConfig.MAP` section from `src/shared/GameConfig.luau` (120 lines of obstacle config)
-- **Removed** MapSetup require, initialize, and cleanup calls from `src/server/init.server.luau`
+### Pushed to GitHub
+Repo live at https://github.com/undeadpickle/roblox-pathfinding-skill-demo.git
 
-### Docs Cleanup
-- **CLAUDE.md** — Removed MapSetup from Key Modules, updated GameConfig description, rewrote Map & Obstacles section to reflect Studio-placed parts
-- **docs/luau-patterns.md** — Updated Init Order pattern example to use existing modules (NPCManager, DebugService) instead of deleted MapSetup
+---
 
-## Files Changed
+## Session 19 Goal: Demo → Toolkit Refactor
 
-### Source
-- `src/server/modules/MapSetup.luau` — **Deleted**
-- `src/server/init.server.luau` — Removed MapSetup require/init/cleanup (3 lines)
-- `src/shared/GameConfig.luau` — Removed `GameConfig.MAP` block (lines 52-170)
+The system currently works as a fixed demo: NPCManager creates exactly 4 NPCs with hardcoded behaviors on a specific map. The goal is to refactor it into a toolkit where:
 
-### Docs
-- `CLAUDE.md` — MapSetup references removed, obstacle section rewritten
-- `docs/luau-patterns.md` — Init Order example updated
-- `docs/session-handoff.md` — This file
+1. **Any existing humanoid model** can be registered as an NPC (no runtime rig creation required)
+2. **Behaviors are assignable** — pick chase, patrol, wander, or guard for any registered NPC
+3. **Behaviors are swappable at runtime** — change an NPC's personality without destroying and rebuilding it
+4. **Individual NPC lifecycle** — spawn one, despawn one, not all-or-nothing
 
-## What's Next
+### What's Already Solid (don't rewrite)
+- **NPCPathfinder** — Generic movement engine. `NPCPathfinder.new(model)` already accepts any model. Methods: moveTo, patrol, followTarget, wander, hasLineOfSight. No demo coupling.
+- **NPCStateMachine** — Generic state machine. Takes a state map + initial state. Reusable.
+- **Behavior state modules** (ChaseStates, PatrolStates, WanderStates, GuardStates) — Self-contained state definitions. Each exports a function that returns a state map. Clean separation.
+- **BehaviorHelpers** — Utility functions (findNearestPlayer, getRandomPointInRadius, etc.). No demo coupling.
 
-### House NPCs (carried forward)
-1. **Add NPCs to the house** — Place pathfinding NPCs inside the suburban home to test multi-room and multi-story navigation
-2. **Test staircase pathfinding** — Verify NPCs can navigate stairs between floors (may need AgentCanClimb or step height tuning)
+### What Needs Refactoring
+- **NPCManager** (~452 lines) — This is the bottleneck. Currently:
+  - Creates R15 rigs from scratch (should also accept pre-placed models)
+  - Hardcodes 4 NPC configs in `initialize()` (should be a registry with `registerNPC()` / `spawnNPC()`)
+  - No individual despawn (only bulk `cleanup()`)
+  - No behavior swapping (state machine is set once, forever)
+  - Debug visuals are wired at spawn time with no swap path
 
-### Debug Panel Roadmap (carried forward)
-3. **Batch 2**: Force state transitions + Respawn individual NPC
-4. **Batch 3**: Config overrides / tuning sliders (live walk speed, detection radius)
-5. **Batch 4**: Event log (timestamped state transitions) + Player state inspector
+### Key Design Questions to Resolve
+1. **How should NPC config be provided?** Options: Roblox attributes/tags on the model, a config table passed to `registerNPC()`, or a hybrid. Attributes would let level designers configure NPCs in Studio without code.
+2. **What does behavior swap look like?** Stop current state machine → clean up behavior-specific visuals (waypoint markers, beams) → create new state machine with new states → restart tick. Need a clean teardown per behavior type.
+3. **How do waypoints/zones get defined for toolkit use?** Patrol needs waypoint positions, guard needs a home zone + waypoints, wander needs a center + radius, chase just needs a detection radius. Could use Workspace markers (Parts tagged as waypoints) or config tables.
+4. **Should rig creation stay as an option?** Useful for runtime spawning. Could be `NPCManager.spawnNPC(config)` (creates rig) vs `NPCManager.registerNPC(existingModel, config)` (adopts model).
 
-### Separation of Concerns Follow-ups (optional)
-6. **Extract behavior debug visuals** — Move waypoint marker creation from PatrolStates/GuardStates/WanderStates into DebugVisuals
-7. **Type the `ctx` parameter** — Define a typed `NpcContext` interface to replace `any` in behavior states and BehaviorHelpers
-8. **Remove unused Wally deps** — Promise, GoodSignal, Trove are installed but not imported
+---
 
-### Other
-9. **Phase 1 core loop**: Player-facing UI, one complete player flow
+## Architecture Notes
+
+- **Obstacles are Studio-placed** in `Workspace.Obstacles` (24 parts). Not in source code.
+- **SuburbanHouse is MCP-constructed** in `Workspace.SuburbanHouse` (96 parts). Not in source code.
+- **DebugVisuals uses late-binding getter pattern** for callbacks (NPCManager inits before DebugService).
+- **NPCPathfinder type errors under --!strict are false positives** — metatable OOP pattern. Ignore them.
+- **Branch:** Work should happen on a new branch (`feat/toolkit-refactor` or similar). `main` preserves the working demo as a revert point.
 
 ## Blockers
 
 None.
-
----
-
-## Key Architecture Notes for Next Session
-
-- **Obstacles are now Studio-placed, not runtime-generated.** `Workspace.Obstacles` folder with 24 parts exists in the place file. Not in source code — similar to the SuburbanHouse model.
-- **BehaviorHelpers still references `Workspace.Obstacles` by name.** `getObstacleFolder()` caches `Workspace:FindFirstChild("Obstacles")` for wander raycast validation. No code changes were needed — it doesn't care how the folder got there.
-- **DebugVisuals uses a getter function for callbacks.** `makeStateLabelUpdater` receives `getDebugCallback` (a function that returns the current callback) instead of the callback value directly. Late-binding pattern because NPCManager.initialize runs before DebugService.initialize.
-- **House is MCP-constructed, not in source code.** The `SuburbanHouse` model exists only in the Studio place file. To rebuild, re-run the construction scripts (plan file: `.claude/plans/ethereal-wiggling-sonnet.md`).
-- **Staircase pathfinding may need tuning.** Steps are 1 stud high x ~1.17 studs deep. Default agent parameters (`AgentCanClimb = false`) may not handle stairs.
-- **NPCPathfinder type errors are expected.** The metatable OOP pattern (`setmetatable({}, Class)`) doesn't type-check under `--!strict`. These are false positives — ignore them.
