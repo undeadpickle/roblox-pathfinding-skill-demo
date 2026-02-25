@@ -420,12 +420,18 @@ function NPCManager.getAllNPCStatus(playerPosition: Vector3): { [string]: any }
 			detectionRadius = GameConfig.NPC.GUARD.DETECTION_RADIUS
 		end
 
-		-- LOS check (Guard only, when chasing a target)
+		-- LOS check (Chase and Guard, when actively targeting a player)
 		local hasLOS: boolean? = nil
-		if entry.behaviorType == "guard" and entry.guardTarget then
-			local targetRoot = entry.guardTarget:FindFirstChild("HumanoidRootPart")
+		local losTarget: Model? = nil
+		if entry.behaviorType == "guard" then
+			losTarget = entry.guardTarget
+		elseif entry.behaviorType == "chase" then
+			losTarget = entry.chaseTarget
+		end
+		if losTarget then
+			local targetRoot = losTarget:FindFirstChild("HumanoidRootPart")
 			if targetRoot and targetRoot:IsA("BasePart") then
-				hasLOS = entry.pathfinder:hasLineOfSight(targetRoot.Position, { entry.guardTarget })
+				hasLOS = entry.pathfinder:hasLineOfSight(targetRoot.Position, { losTarget })
 			end
 		end
 

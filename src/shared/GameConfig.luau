@@ -191,11 +191,12 @@ GameConfig.NPC = table.freeze({
 	-- Chase NPC: pursues nearest player
 	CHASE = table.freeze({
 		DISPLAY_NAME = "Chase NPC",
-		WALK_SPEED = 8,
-		DETECTION_RADIUS = 35,
+		WALK_SPEED = 4,
+		DETECTION_RADIUS = 20,
 		RECOMPUTE_INTERVAL = 0.5,
 		ARRIVAL_DISTANCE = 5,
 		REEVALUATE_INTERVAL = 3,
+		REQUIRE_LOS = true, -- Walls block detection; set false to see through walls
 	}),
 
 	-- Patrol NPC: walks a rectangular route
@@ -222,6 +223,7 @@ GameConfig.NPC = table.freeze({
 		DETECT_INTERVAL = 0.2,
 		PATROL_PAUSE = 1.5,
 		RETURN_DWELL = 0.8,
+		REQUIRE_LOS = true, -- Walls block detection; set false to see through walls
 		WAYPOINTS = table.freeze({
 			Vector3.new(10, 5, 25),
 			Vector3.new(15, 5, 45),

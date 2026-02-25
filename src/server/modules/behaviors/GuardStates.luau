@@ -20,34 +20,6 @@ local log = Logger.new("GuardStates")
 
 local GUARD_COLOR = Color3.fromRGB(255, 139, 0) -- Orange
 
---- Detect nearest player within range + LOS. Used by Guarding and Returning states.
-local function detectPlayerWithLOS(ctx: any): string?
-	local rootPart = ctx.model.PrimaryPart
-	if not rootPart then
-		return nil
-	end
-
-	local target = BehaviorHelpers.findNearestPlayer(rootPart.Position)
-	if not target then
-		return nil
-	end
-
-	local targetRoot = target:FindFirstChild("HumanoidRootPart")
-	if not targetRoot then
-		return nil
-	end
-
-	local distance = ((targetRoot :: BasePart).Position - rootPart.Position).Magnitude
-	if distance <= GameConfig.NPC.GUARD.DETECTION_RADIUS then
-		if ctx.pathfinder:hasLineOfSight((targetRoot :: BasePart).Position, { target }) then
-			ctx.guardTarget = target
-			return "Chasing"
-		end
-	end
-
-	return nil
-end
-
 local GuardStates: NPCStateMachine.StateMap = {
 	Guarding = {
 		onEnter = function(ctx: any)
@@ -87,7 +59,7 @@ local GuardStates: NPCStateMachine.StateMap = {
 			end
 			ctx.guardDetectTimer = 0
 
-			return detectPlayerWithLOS(ctx)
+			return BehaviorHelpers.detectNearestPlayerInRange(ctx, GameConfig.NPC.GUARD, "guardTarget", "Chasing")
 		end,
 
 		onExit = function(ctx: any)
@@ -185,7 +157,7 @@ local GuardStates: NPCStateMachine.StateMap = {
 			end
 			ctx.guardDetectTimer = 0
 
-			return detectPlayerWithLOS(ctx)
+			return BehaviorHelpers.detectNearestPlayerInRange(ctx, GameConfig.NPC.GUARD, "guardTarget", "Chasing")
 		end,
 
 		onExit = function(ctx: any)

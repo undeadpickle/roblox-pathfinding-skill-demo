@@ -24,28 +24,7 @@ local ChaseStates: NPCStateMachine.StateMap = {
 		end,
 
 		onUpdate = function(ctx: any, _dt: number): string?
-			local rootPart = ctx.model.PrimaryPart
-			if not rootPart then
-				return nil
-			end
-
-			local target = BehaviorHelpers.findNearestPlayer(rootPart.Position)
-			if not target then
-				return nil
-			end
-
-			local targetRoot = target:FindFirstChild("HumanoidRootPart")
-			if not targetRoot then
-				return nil
-			end
-
-			local distance = ((targetRoot :: BasePart).Position - rootPart.Position).Magnitude
-			if distance <= GameConfig.NPC.CHASE.DETECTION_RADIUS then
-				ctx.chaseTarget = target
-				return "Chasing"
-			end
-
-			return nil
+			return BehaviorHelpers.detectNearestPlayerInRange(ctx, GameConfig.NPC.CHASE, "chaseTarget", "Chasing")
 		end,
 	},
 

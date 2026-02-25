@@ -39,6 +39,45 @@ function BehaviorHelpers.findNearestPlayer(position: Vector3): Model?
 	return nearest
 end
 
+--- Detect nearest player within detection radius, optionally requiring line of sight.
+--- Returns transitionState if a valid target is found, nil otherwise.
+--- Sets ctx[targetField] to the detected player character on success.
+function BehaviorHelpers.detectNearestPlayerInRange(
+	ctx: any,
+	config: { DETECTION_RADIUS: number, REQUIRE_LOS: boolean? },
+	targetField: string,
+	transitionState: string
+): string?
+	local rootPart = ctx.model.PrimaryPart
+	if not rootPart then
+		return nil
+	end
+
+	local target = BehaviorHelpers.findNearestPlayer(rootPart.Position)
+	if not target then
+		return nil
+	end
+
+	local targetRoot = target:FindFirstChild("HumanoidRootPart")
+	if not targetRoot then
+		return nil
+	end
+
+	local distance = ((targetRoot :: BasePart).Position - rootPart.Position).Magnitude
+	if distance > config.DETECTION_RADIUS then
+		return nil
+	end
+
+	if config.REQUIRE_LOS ~= false then
+		if not ctx.pathfinder:hasLineOfSight((targetRoot :: BasePart).Position, { target }) then
+			return nil
+		end
+	end
+
+	ctx[targetField] = target
+	return transitionState
+end
+
 -- ═══════════════════════════════════════════════════════════
 -- RANDOM POINT GENERATION
 -- ═══════════════════════════════════════════════════════════
