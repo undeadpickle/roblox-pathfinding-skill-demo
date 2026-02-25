@@ -99,6 +99,17 @@ NPC pathfinding demo showcasing chase, patrol, wander, and guard behaviors using
 - Chase NPC: `WALK_SPEED` 8, `DETECTION_RADIUS` 15
 - Guard NPC: `WALK_SPEED` 10, `DETECTION_RADIUS` 18, 5 waypoints in pentagon layout (north quadrant)
 
+### Suburban House (MCP-constructed, not in source)
+- Two-story suburban home built via MCP `run_code` directly in Studio (not config-driven)
+- Model: `Workspace.SuburbanHouse` — 96 parts (floors, walls, stairs)
+- World position: main house X:80-180, Z:-30 to Z:30; garage extends to X:210
+- **First floor (Y=0):** Living Room, Kitchen/Dining, Master Bedroom, Corridor, Entrance Hall, Bedroom 2, Bathroom, Utility Room, Garage, 12-step staircase in entrance hall
+- **Second floor (Y=13):** Bedroom 3, Bedroom 4, Landing (with stairwell void), Master Suite, Upstairs Bath, Master Ensuite
+- Color-coded floors per room, off-white walls, doorway openings (5-stud wide, 9-stud tall), open-plan kitchen (20-stud opening), 14-stud garage door
+- Staircase: 12 steps ascending south-to-north (Z=48→Z=34) from entrance hall to second floor landing
+- Idempotent construction script — re-run to rebuild. Plan file: `.claude/plans/ethereal-wiggling-sonnet.md`
+- No NPCs placed in house yet
+
 ## Development Workflow
 
 ```bash

@@ -120,3 +120,9 @@
 - **[Pathfinding]** Don't recompute paths while the humanoid is in `Freefall` state. The NPC's position mid-air is unreliable, causing `ComputeAsync` to use a bad start position and produce erratic paths on landing. Check `self._humanoid:GetState() == Enum.HumanoidStateType.Freefall` at the top of `_computePath` and return the existing waypoints instead. Found by comparing against SimplePath's approach — one of very few things it handled that we didn't.
 
 - **[Docs]** Don't ship skill assets as a single condensed "reference" file that simplifies the production module. It drifts silently as production code evolves — this session found the asset was missing freefall rejection, `_visualizeOverride`, stuck detection, collision group setup, and the full `_resetMovement`/`stop` separation. Ship assets as separate files matching production's module structure (one per module) so diffs between asset and production are meaningful. Extends the earlier "audit skill docs against lessons" rule with a structural fix.
+
+## Session: 2026-02-24 — Suburban House Construction (MCP)
+
+- **[MCP]** Don't try to build complex multi-part geometry through MapSetup/GameConfig when iterating on layout. Use `run_code` to execute a self-contained Luau construction script directly in Studio — it's faster to iterate (edit script, re-run), idempotent (destroy + recreate), and doesn't bloat source files. Move to config-driven only once the layout is finalized and needs to persist across sessions.
+
+- **[MCP]** Don't build multi-story geometry in a single monolithic script. Split into per-floor scripts that modify the same Model — each stays under token limits and is independently re-runnable. The second script can reference parts created by the first.

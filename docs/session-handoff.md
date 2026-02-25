@@ -1,76 +1,57 @@
 # Session Handoff
 
-> Updated: 2026-02-24 (Session 14)
-> Focus: SimplePath comparison, NPC pathfinding skill v2.0 rewrite
+> Updated: 2026-02-24 (Session 15)
+> Focus: Suburban house interior construction (two-story, MCP-built)
 
 ---
 
 ## What Got Done
 
-### SimplePath Comparison
+### Suburban House Construction
 
-- Analyzed SimplePath (popular Roblox community pathfinding module) against our NPCPathfinder
-- Evaluated 9 features — our implementation was superior in 7, equivalent in 1
-- Only 1 thing worth stealing: **freefall state rejection** (~3 lines in `_computePath`)
-- Implemented the freefall guard in production `NPCPathfinder.luau`:
-  ```lua
-  if self._humanoid:GetState() == Enum.HumanoidStateType.Freefall then
-      return #self._waypoints > 0
-  end
-  ```
+Built a complete two-story suburban home interior in Roblox Studio via MCP `run_code`. The house is a `SuburbanHouse` Model in Workspace with 96 parts, placed well clear of the existing NPC demo area (world X:80-210).
 
-### Skill Rewrite: roblox-npc-pathfinding v2.0
+**First Floor (Y=0):**
+- 9 rooms: Living Room (30x60), Kitchen/Dining (30x26), Master Bedroom (40x26), Corridor (70x8), Entrance Hall (L-shaped, split for stairwell), Bedroom 2 (22x26), Bathroom (14x26), Utility Room (12x26), Garage (30x40)
+- Color-coded floors per room (warm wood, cream tile, blue-grey carpet, etc.)
+- Front door opening (south wall), garage door (14-stud wide, east wall), utility-to-garage door
+- Open-plan kitchen (20-stud opening to corridor)
+- 12-step staircase in entrance hall (ascending south-to-north, Y=1 to Y=13)
 
-Full rewrite of `.claude/skills/roblox-npc-pathfinding/` to match production code and be reusable across any Roblox project.
+**Second Floor (Y=13):**
+- 6 rooms: Bedroom 3 (36x30), Bedroom 4 (36x30), Landing/Hallway (20x60, split into 4 parts), Master Suite (44x34), Upstairs Bath (22x26), Master Ensuite (22x26)
+- Stairwell void in landing floor (no floor over X=40..52, Z=34..48)
+- Stairwell safety walls on 3 sides (north open = exit onto landing)
+- All rooms have doorway openings to landing/hallway
 
-**Assets (3 new, 1 deleted):**
-- `assets/npc-pathfinder.luau` — Production-matching, Logger→warn(), all 7 bugs from old asset fixed
-- `assets/npc-state-machine.luau` — Ported from production, Logger→warn()
-- `assets/behavior-helpers.luau` — Ported from production
-- `assets/npc-pathfinder-module.luau` — Deleted (replaced by npc-pathfinder.luau)
-
-**SKILL.md** — Full rewrite with interactive wizard flow. User picks NPC type (Chase/Patrol/Wander/Guard/Custom), answers follow-up questions, gets generated code. Flee and Formation patterns cut (hypothetical, never built).
-
-**Reference files updated:**
-- `behavior-patterns.md` — Full rewrite: Controller classes → state machine patterns
-- `performance-patterns.md` — Fixed disabled humanoid states bug
-- `common-pitfalls.md` — Added 4 entries (freefall, LOS exclusion, LOS flicker, visualize override)
-- `audit-checklist.md` — Added Section 7 (State Machine & Behavior Architecture, 7 items)
-- `integration-guide.md` — Updated for 3-module architecture + state machine wiring example
+**Construction approach:**
+- Two Luau scripts executed via `mcp__roblox-studio__run_code`
+- Script 1: First floor (rebuilt with staircase modifications)
+- Script 2: Second floor (added to existing model)
+- Idempotent: destroys and recreates on re-run
+- Plan file: `.claude/plans/ethereal-wiggling-sonnet.md`
 
 ## Files Changed
 
-### Production Code
-- `src/server/modules/NPCPathfinder.luau` — Added freefall state rejection in `_computePath`
-
-### Skill Files (all under `.claude/skills/roblox-npc-pathfinding/`)
-- `SKILL.md` — Full rewrite (v2.0.0)
-- `assets/npc-pathfinder.luau` — New (replaces npc-pathfinder-module.luau)
-- `assets/npc-state-machine.luau` — New
-- `assets/behavior-helpers.luau` — New
-- `assets/npc-pathfinder-module.luau` — Deleted
-- `references/behavior-patterns.md` — Full rewrite
-- `references/performance-patterns.md` — Bug fix
-- `references/common-pitfalls.md` — 4 new entries
-- `references/audit-checklist.md` — New section 7
-- `references/integration-guide.md` — Updated module placement + wiring example
-
 ### Docs
-- `docs/lessons-learned.md` — 2 new entries (freefall rejection, skill asset structure)
+- `CLAUDE.md` — Added "Suburban House" subsection under Map & Obstacles
+- `docs/lessons-learned.md` — 2 new entries (MCP construction patterns)
+- `docs/session-handoff.md` — This file
 
 ## What's Next
 
-### Debug Panel Roadmap (from prioritized plan)
+### House NPCs
+1. **Add NPCs to the house** — Place pathfinding NPCs inside the suburban home to test multi-room and multi-story navigation
+2. **Test staircase pathfinding** — Verify NPCs can navigate stairs between floors (may need AgentCanClimb or step height tuning)
 
-1. **Batch 2**: Force state transitions + Respawn individual NPC
-2. **Batch 3**: Config overrides / tuning sliders (live walk speed, detection radius)
-3. **Batch 4**: Event log (timestamped state transitions) + Player state inspector
-4. **Batch 5**: NPC tick health dashboard + Noclip/fly mode
+### Debug Panel Roadmap (carried forward)
+3. **Batch 2**: Force state transitions + Respawn individual NPC
+4. **Batch 3**: Config overrides / tuning sliders (live walk speed, detection radius)
+5. **Batch 4**: Event log (timestamped state transitions) + Player state inspector
 
 ### Other
-
-5. **More elevation variety**: Ramps, platforms, multi-level terrain
-6. **Phase 1 core loop**: Player-facing UI, one complete player flow
+6. **More elevation variety**: Ramps, platforms, multi-level terrain
+7. **Phase 1 core loop**: Player-facing UI, one complete player flow
 
 ## Blockers
 
@@ -80,13 +61,13 @@ None.
 
 ## Key Architecture Notes for Next Session
 
-- **Force state transitions (Batch 2)**: `NPCStateMachine` has `transitionTo(stateName)` already. Gotcha: forcing Guard into Chasing without a target — `onEnter` expects `ctx.guardTarget`. Need to auto-assign nearest player or warn.
-- **Respawn NPC (Batch 2)**: Per-NPC cleanup path exists in `NPCManager.cleanup()`. Need to extract into reusable `spawnAndConfigureNPC(behaviorType)` — the monolithic `initialize()` does all 4 inline currently.
-- **Config sliders (Batch 3)**: `GameConfig` is frozen (`table.freeze`). Sliders must set values on runtime objects directly. Detection radius needs a `ctx.detectionRadiusOverride` field (same pattern as `_wanderBeamVisible`).
-- **Skill v2.0 is complete** — All assets match production code, all reference docs updated. Plan file at `.claude/plans/dynamic-spinning-nest.md` documents the full rewrite scope.
+- **House is MCP-constructed, not in source code.** The `SuburbanHouse` model exists only in the Studio place file. It's not created by MapSetup or GameConfig. To rebuild, re-run the construction scripts (see plan file for the complete Luau code).
+- **Staircase pathfinding may need tuning.** Steps are 1 stud high x ~1.17 studs deep. Default PathfindingService agent parameters (`AgentCanClimb = false`) may not handle stairs. Options: enable `AgentCanClimb`, reduce step height, or use a ramp instead.
+- **No collision group on house parts.** House walls are standard Parts (no collision group). NPCs using the "NPCs" collision group will collide with walls normally, which is correct behavior.
+- **Second floor exterior walls are independent of first floor.** The F2 exterior walls sit at Y=14-26, directly above F1 exterior walls at Y=1-13. They're separate Parts, not extensions.
 
 ---
 
 ## CLAUDE.md Suggestions
 
-None — still current.
+None — updated this session.
