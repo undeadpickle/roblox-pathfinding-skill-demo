@@ -161,6 +161,7 @@ GameConfig.MAP = table.freeze({
 			name = "ChaseStairs",
 			type = "staircase",
 			position = Vector3.new(45, 0, 10),
+			size = Vector3.zero, -- unused for staircases; satisfies array type inference
 			steps = 8,
 			stepSize = Vector3.new(6, 1, 2),
 			color = Color3.fromRGB(90, 95, 102),

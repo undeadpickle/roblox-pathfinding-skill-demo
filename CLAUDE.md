@@ -61,7 +61,8 @@ NPC pathfinding demo showcasing chase, patrol, wander, and guard behaviors using
 - `MapSetup` — Config-driven obstacle geometry spawner (reads `GameConfig.MAP.OBSTACLES`)
 - `NPCPathfinder` — PathfindingService wrapper with moveTo, patrol, followTarget, wander, hasLineOfSight, setVisualizeEnabled
 - `NPCStateMachine` — Generic finite state machine (shared, reusable for any system). Optional `onStateChanged` callback (4th param) fires on initial state and every transition.
-- `NPCManager` — Orchestrator: spawns NPCs, wires behavior state maps to pathfinder, manages lifecycle. Exposes `getAllNPCStatus()`, `setDebugVisualEnabled()`, `setDebugStateCallback()`, `getNPCPosition()`, `teleportNPC()` for debug panel. State definitions live in `behaviors/` modules.
+- `NPCManager` — Orchestrator: spawns NPCs, wires behavior state maps to pathfinder, manages lifecycle. Delegates debug visuals to `DebugVisuals`. Exposes `getAllNPCStatus()`, `setDebugVisualEnabled()`, `setDebugStateCallback()`, `getNPCPosition()`, `teleportNPC()` for debug panel. State definitions live in `behaviors/` modules.
+- `DebugVisuals` — Debug visualization: state labels, detection discs, visual toggling (`setVisualEnabled`), per-frame debug updates (`updateTick`), cleanup. Extracted from NPCManager to separate presentation from NPC lifecycle.
 - `behaviors/ChaseStates` — Chase NPC state definitions (Idle ↔ Chasing)
 - `behaviors/PatrolStates` — Patrol NPC state definitions (Patrolling)
 - `behaviors/WanderStates` — Wander NPC state definitions (Wandering)

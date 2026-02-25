@@ -132,3 +132,9 @@
 - **[Architecture]** Don't gate initial detection on LOS without also adding a memory timer for chase maintenance. Distance-only chase maintenance creates a broken mental model: walls matter for detection but not escape. Use `LOS_MEMORY` (configurable seconds) so NPCs give up after losing sight, completing the stealth loop (Alert → Pursuit → Memory → Disengage).
 
 - **[Architecture]** Don't add visual debug state by creating new systems. Annotate the existing state label in the PostSimulation tick — the state machine's `onStateChanged` callback naturally restores it on the next transition, so no cleanup is needed.
+
+## Session: 2026-02-25 — Separation of Concerns Audit & DebugVisuals Extraction
+
+- **[Luau]** Don't mix different table shapes in a frozen array under `--!strict`. Luau infers the array type from all elements and flags mismatches. Add dummy fields to variant entries (e.g., `size = Vector3.zero` for staircases) so all elements share the same base shape.
+
+- **[Architecture]** Don't pass a module-level variable's current value when extracting a closure to another module. The extracted closure captures the value at call time (nil), not the variable. Use a getter function (`function() return variable end`) to preserve late-binding across module boundaries.

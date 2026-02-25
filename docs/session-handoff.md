@@ -1,58 +1,43 @@
 # Session Handoff
 
-> Updated: 2026-02-25 (Session 16)
-> Focus: LOS detection system — REQUIRE_LOS config, LOS_MEMORY timer, debug indicators
+> Updated: 2026-02-25 (Session 17)
+> Focus: Separation of concerns audit + DebugVisuals extraction from NPCManager
 
 ---
 
 ## What Got Done
 
-### LOS Detection for Chase & Guard NPCs
+### Separation of Concerns Audit
+Full codebase audit across all server, client, and shared modules. Rated B+ overall. Key findings: clean layering, good module cohesion, but debug visualization scattered across NPCManager, behavior states, and BehaviorHelpers. NPCManager identified as approaching God Object status (~40% debug code).
 
-Added configurable line-of-sight detection to Chase and Guard NPCs. Previously, Chase NPC used distance-only detection (could see through walls). Now both behaviors use `REQUIRE_LOS` (on by default) with shared helpers.
+### DebugVisuals Extraction
+Extracted all debug visual concerns from NPCManager into a new `DebugVisuals.luau` module:
+- `createStateLabel` / `makeStateLabelUpdater` — state label creation + transition updates
+- `createDetectionRadiusCircle` — detection disc creation
+- `setVisualEnabled` — all 7 toggle branches (disc, stateLabel, waypoints, wanderBeam, chasePath, nameLabel, waypointNumbers)
+- `updateTick` — per-frame LOS countdown annotation + disc position following
+- `cleanupEntry` — debug instance destruction
 
-**Changes:**
-- New `detectNearestPlayerInRange()` shared helper in BehaviorHelpers — replaces inline detection in both Chase and Guard states
-- Guard's 26-line local `detectPlayerWithLOS` function removed in favor of shared helper
-- Chase Idle state now respects walls (previously distance-only)
+NPCManager dropped from 615 to 452 lines. Zero behavior state files changed.
 
-### LOS Memory Timer
-
-Added `LOS_MEMORY` config to both Chase (3s) and Guard (5s) NPCs. When an NPC loses line of sight during a chase, it continues pursuing for N seconds before giving up. Completes the stealth loop: walls block detection AND allow escape.
-
-**Changes:**
-- `evaluateChaseTarget` in BehaviorHelpers now checks LOS each tick when `LOS_MEMORY` is configured, accumulates `ctx.losLostTimer`, and drops target when timer expires
-- Timer resets when LOS is regained
-- Timer clears on state exit and target-switch paths
-- Backward compatible: `nil` LOS_MEMORY = no LOS checking during chase (original behavior)
-
-### Debug Indicators
-
-- **State label annotation:** During LOS memory countdown, state label changes from "Chasing" (red) to "Chasing (3.0s)" (cyan), counting down in real time. Restores automatically on state transition.
-- **Console logging:** BehaviorHelpers now logs LOS events: "LOS lost — memory countdown started", "LOS still blocked — Xs remaining", "LOS memory expired — dropping target", "LOS regained — resetting memory timer"
-- **Debug panel:** `LOS: No (2.0s)` shown during countdown (was just `LOS: Yes/No`)
-
-### Config Tweaks (user-initiated)
-- Chase NPC: `WALK_SPEED` 8→4, `DETECTION_RADIUS` 35→20
+### GameConfig Type Fix
+Fixed Luau `--!strict` type error on OBSTACLES array — staircase entry was missing `size` field. Added `size = Vector3.zero` dummy field to satisfy array type inference.
 
 ## Files Changed
 
 ### Source
-- `src/shared/GameConfig.luau` — Added `REQUIRE_LOS`, `LOS_MEMORY` to CHASE and GUARD configs; adjusted Chase speed/radius
-- `src/server/modules/behaviors/BehaviorHelpers.luau` — Added Logger, `detectNearestPlayerInRange()`, expanded `evaluateChaseTarget` with LOS memory + logging
-- `src/server/modules/behaviors/ChaseStates.luau` — Replaced inline detection with shared helper, added `losLostTimer` cleanup
-- `src/server/modules/behaviors/GuardStates.luau` — Removed local detection function, switched to shared helper, added `losLostTimer` cleanup
-- `src/server/modules/NPCManager.luau` — Added `losLostTimer` to NPCEntry type, state label countdown annotation in PostSimulation tick, expanded status reporting
-- `src/client/modules/DebugPanel.luau` — LOS countdown display in status readout
+- `src/server/modules/DebugVisuals.luau` — **New** — extracted debug visual module
+- `src/server/modules/NPCManager.luau` — Removed debug functions, delegates to DebugVisuals
+- `src/shared/GameConfig.luau` — Added `size = Vector3.zero` to staircase obstacle entry
 
 ### Docs
-- `CLAUDE.md` — Updated Chase/Guard config values, added LOS system notes, updated BehaviorHelpers description
-- `docs/lessons-learned.md` — 2 new entries (LOS detection + debug annotation patterns)
+- `CLAUDE.md` — Added DebugVisuals to Key Modules, updated NPCManager description
+- `docs/lessons-learned.md` — 2 new entries (array type inference, cross-module callback pattern)
 - `docs/session-handoff.md` — This file
 
 ## What's Next
 
-### House NPCs
+### House NPCs (carried forward)
 1. **Add NPCs to the house** — Place pathfinding NPCs inside the suburban home to test multi-room and multi-story navigation
 2. **Test staircase pathfinding** — Verify NPCs can navigate stairs between floors (may need AgentCanClimb or step height tuning)
 
@@ -61,9 +46,13 @@ Added `LOS_MEMORY` config to both Chase (3s) and Guard (5s) NPCs. When an NPC lo
 4. **Batch 3**: Config overrides / tuning sliders (live walk speed, detection radius)
 5. **Batch 4**: Event log (timestamped state transitions) + Player state inspector
 
+### Separation of Concerns Follow-ups (optional)
+6. **Extract behavior debug visuals** — Move waypoint marker creation from PatrolStates/GuardStates/WanderStates into DebugVisuals (lower priority, behavior states are acceptable as-is)
+7. **Type the `ctx` parameter** — Define a typed `NpcContext` interface to replace `any` in behavior states and BehaviorHelpers
+8. **Remove unused Wally deps** — Promise, GoodSignal, Trove are installed but not imported
+
 ### Other
-6. **More elevation variety**: Ramps, platforms, multi-level terrain
-7. **Phase 1 core loop**: Player-facing UI, one complete player flow
+9. **Phase 1 core loop**: Player-facing UI, one complete player flow
 
 ## Blockers
 
@@ -73,14 +62,8 @@ None.
 
 ## Key Architecture Notes for Next Session
 
-- **LOS system is config-driven.** Set `REQUIRE_LOS = false` to disable wall-blocking. Set `LOS_MEMORY = nil` (or omit) to chase forever once spotted. Both are per-NPC-type in GameConfig.
-- **`ctx.losLostTimer` is a shared field.** Both Chase and Guard use the same `ctx.losLostTimer` field — it's reset in `onExit` of each Chasing state. If adding a new behavior with chase, follow the same pattern.
-- **State label countdown is ephemeral.** The PostSimulation tick annotates the label; `onStateChanged` callback restores it. No cleanup needed, but the annotation only works when `GAME.DEBUG = true` (stateLabel is only created in debug mode).
+- **DebugVisuals uses a getter function for callbacks.** `makeStateLabelUpdater` receives `getDebugCallback` (a function that returns the current callback) instead of the callback value directly. This is because NPCManager.initialize runs before DebugService.initialize, so the callback is nil at NPC spawn time. The getter preserves late-binding.
+- **NPCEntry type still lives in NPCManager** with all debug fields (debugFolder, debugDisc, stateLabel, _wanderBeamVisible). Behavior states write to these fields directly. DebugVisuals reads them via `entry: any` parameters.
 - **House is MCP-constructed, not in source code.** The `SuburbanHouse` model exists only in the Studio place file. To rebuild, re-run the construction scripts (plan file: `.claude/plans/ethereal-wiggling-sonnet.md`).
 - **Staircase pathfinding may need tuning.** Steps are 1 stud high x ~1.17 studs deep. Default agent parameters (`AgentCanClimb = false`) may not handle stairs.
-
----
-
-## CLAUDE.md Suggestions
-
-None — updated this session.
+- **NPCPathfinder type errors are expected.** The metatable OOP pattern (`setmetatable({}, Class)`) doesn't type-check under `--!strict`. These are false positives — ignore them.

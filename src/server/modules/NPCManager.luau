@@ -29,6 +29,8 @@ local Logger = require(Shared.Logger)
 local NPCPathfinder = require(script.Parent.NPCPathfinder)
 local NPCStateMachine = require(Shared.NPCStateMachine)
 
+local DebugVisuals = require(script.Parent.DebugVisuals)
+
 -- Behavior state maps
 local BehaviorHelpers = require(script.Parent.behaviors.BehaviorHelpers)
 local ChaseStates = require(script.Parent.behaviors.ChaseStates)
@@ -162,103 +164,6 @@ local function createNPCModel(displayName: string, spawnPosition: Vector3): Mode
 end
 
 -- ═══════════════════════════════════════════════════════════
--- DEBUG STATE LABELS
--- ═══════════════════════════════════════════════════════════
-
-local function createStateLabel(model: Model): TextLabel?
-	if not GameConfig.GAME.DEBUG then
-		return nil
-	end
-
-	local head = model:FindFirstChild("Head")
-	if not head or not head:IsA("BasePart") then
-		return nil
-	end
-
-	local config = GameConfig.NPC.STATE_LABEL
-
-	local billboard = Instance.new("BillboardGui")
-	billboard.Name = "StateLabelGui"
-	billboard.Size = config.SIZE
-	billboard.StudsOffset = config.STUDS_OFFSET
-	billboard.AlwaysOnTop = true
-
-	local label = Instance.new("TextLabel")
-	label.Name = "StateLabel"
-	label.Size = UDim2.fromScale(1, 1)
-	label.BackgroundTransparency = 1
-	label.Text = ""
-	label.TextColor3 = config.DEFAULT_COLOR
-	label.TextStrokeTransparency = config.STROKE_TRANSPARENCY
-	label.Font = config.FONT
-	label.TextSize = config.TEXT_SIZE
-	label.Parent = billboard
-
-	billboard.Parent = head
-
-	return label
-end
-
-local function makeStateLabelUpdater(
-	npcName: string,
-	stateLabel: TextLabel?
-): ((newState: string, previousState: string?) -> ())?
-	if not stateLabel then
-		return nil
-	end
-	local colors = GameConfig.NPC.STATE_LABEL.COLORS
-	local defaultColor = GameConfig.NPC.STATE_LABEL.DEFAULT_COLOR
-	return function(newState: string, _previousState: string?)
-		stateLabel.Text = newState
-		stateLabel.TextColor3 = colors[newState] or defaultColor
-		log:debug(`State changed: {_previousState or "init"} -> {newState}`)
-		if debugStateCallback then
-			debugStateCallback(npcName, newState, _previousState)
-		end
-	end
-end
-
--- ═══════════════════════════════════════════════════════════
--- DEBUG VISUALS
--- ═══════════════════════════════════════════════════════════
-
-local function createDetectionRadiusCircle(model: Model, radius: number, color: Color3): Part?
-	if not GameConfig.GAME.DEBUG then
-		return nil
-	end
-
-	local rootPart = model.PrimaryPart
-	if not rootPart then
-		return nil
-	end
-
-	local diameter = radius * 2
-	local disc = Instance.new("Part")
-	disc.Name = "DetectionRadiusDisc"
-	disc.Shape = Enum.PartType.Cylinder
-	-- Cylinder axis is along X, so X = thickness, Y/Z = diameter
-	disc.Size = Vector3.new(0.2, diameter, diameter)
-	-- Lay flat at ground level. Anchored + explicit CFrame update in PostSimulation tick.
-	disc.CFrame = CFrame.new(rootPart.Position.X, 0.15, rootPart.Position.Z) * CFrame.Angles(0, 0, math.rad(90))
-	disc.Anchored = true
-	disc.CanCollide = false
-	disc.CanTouch = false
-	disc.CanQuery = false
-	disc.CastShadow = false
-	disc.Material = Enum.Material.Neon
-	disc.Color = color
-	disc.Transparency = 0.85
-
-	disc.Parent = Workspace
-
-	log:debug(
-		`Detection disc created: diameter={diameter}, pos=({disc.Position.X}, {disc.Position.Y}, {disc.Position.Z})`
-	)
-
-	return disc
-end
-
--- ═══════════════════════════════════════════════════════════
 -- SPAWNING
 -- ═══════════════════════════════════════════════════════════
 
@@ -304,24 +209,38 @@ function NPCManager.initialize(): ()
 	local wanderEntry = spawnNPC("wander", GameConfig.NPC.WANDER.DISPLAY_NAME, positions.WANDER)
 	local chaseEntry = spawnNPC("chase", GameConfig.NPC.CHASE.DISPLAY_NAME, positions.CHASE)
 
+	-- Helper: creates a getter for the debug state callback (late-binding because
+	-- DebugService.initialize sets it after NPCs spawn)
+	local function getDebugCallback()
+		return debugStateCallback
+	end
+
 	-- Attach state machines — each starts in its initial state (onEnter fires immediately)
 	if patrolEntry then
-		patrolEntry.stateLabel = createStateLabel(patrolEntry.model)
+		patrolEntry.stateLabel = DebugVisuals.createStateLabel(patrolEntry.model)
 		patrolEntry.stateMachine = NPCStateMachine.new(
 			"Patrolling",
 			PatrolStates,
 			patrolEntry,
-			makeStateLabelUpdater(GameConfig.NPC.PATROL.DISPLAY_NAME, patrolEntry.stateLabel)
+			DebugVisuals.makeStateLabelUpdater(
+				GameConfig.NPC.PATROL.DISPLAY_NAME,
+				patrolEntry.stateLabel,
+				getDebugCallback
+			)
 		)
 	end
 
 	if wanderEntry then
-		wanderEntry.stateLabel = createStateLabel(wanderEntry.model)
+		wanderEntry.stateLabel = DebugVisuals.createStateLabel(wanderEntry.model)
 		wanderEntry.stateMachine = NPCStateMachine.new(
 			"Wandering",
 			WanderStates,
 			wanderEntry,
-			makeStateLabelUpdater(GameConfig.NPC.WANDER.DISPLAY_NAME, wanderEntry.stateLabel)
+			DebugVisuals.makeStateLabelUpdater(
+				GameConfig.NPC.WANDER.DISPLAY_NAME,
+				wanderEntry.stateLabel,
+				getDebugCallback
+			)
 		)
 	end
 
@@ -331,8 +250,8 @@ function NPCManager.initialize(): ()
 			humanoid.WalkSpeed = GameConfig.NPC.CHASE.WALK_SPEED
 		end
 		-- Chase starts Idle — transitions to Chasing when a player enters detection radius
-		chaseEntry.stateLabel = createStateLabel(chaseEntry.model)
-		chaseEntry.debugDisc = createDetectionRadiusCircle(
+		chaseEntry.stateLabel = DebugVisuals.createStateLabel(chaseEntry.model)
+		chaseEntry.debugDisc = DebugVisuals.createDetectionRadiusCircle(
 			chaseEntry.model,
 			GameConfig.NPC.CHASE.DETECTION_RADIUS,
 			Color3.fromRGB(239, 68, 68)
@@ -341,7 +260,11 @@ function NPCManager.initialize(): ()
 			"Idle",
 			ChaseStates,
 			chaseEntry,
-			makeStateLabelUpdater(GameConfig.NPC.CHASE.DISPLAY_NAME, chaseEntry.stateLabel)
+			DebugVisuals.makeStateLabelUpdater(
+				GameConfig.NPC.CHASE.DISPLAY_NAME,
+				chaseEntry.stateLabel,
+				getDebugCallback
+			)
 		)
 	end
 
@@ -352,8 +275,8 @@ function NPCManager.initialize(): ()
 			humanoid.WalkSpeed = GameConfig.NPC.GUARD.WALK_SPEED
 		end
 		-- Guard starts Guarding — LOS+distance triggers Chasing, then Returning to post
-		guardEntry.stateLabel = createStateLabel(guardEntry.model)
-		guardEntry.debugDisc = createDetectionRadiusCircle(
+		guardEntry.stateLabel = DebugVisuals.createStateLabel(guardEntry.model)
+		guardEntry.debugDisc = DebugVisuals.createDetectionRadiusCircle(
 			guardEntry.model,
 			GameConfig.NPC.GUARD.DETECTION_RADIUS,
 			Color3.fromRGB(255, 139, 0)
@@ -362,7 +285,11 @@ function NPCManager.initialize(): ()
 			"Guarding",
 			GuardStates,
 			guardEntry,
-			makeStateLabelUpdater(GameConfig.NPC.GUARD.DISPLAY_NAME, guardEntry.stateLabel)
+			DebugVisuals.makeStateLabelUpdater(
+				GameConfig.NPC.GUARD.DISPLAY_NAME,
+				guardEntry.stateLabel,
+				getDebugCallback
+			)
 		)
 	end
 
@@ -374,29 +301,7 @@ function NPCManager.initialize(): ()
 				if entry.stateMachine then
 					entry.stateMachine:update(dt)
 				end
-				-- Annotate state label during LOS memory countdown
-				if entry.stateLabel and entry.losLostTimer then
-					local memoryConfig: number? = nil
-					if entry.behaviorType == "chase" then
-						memoryConfig = GameConfig.NPC.CHASE.LOS_MEMORY
-					elseif entry.behaviorType == "guard" then
-						memoryConfig = GameConfig.NPC.GUARD.LOS_MEMORY
-					end
-					if memoryConfig then
-						local remaining = math.max(0, memoryConfig - entry.losLostTimer)
-						entry.stateLabel.Text = string.format("Chasing (%.1fs)", remaining)
-						entry.stateLabel.TextColor3 = GameConfig.NPC.STATE_LABEL.COLORS.Returning
-							or GameConfig.NPC.STATE_LABEL.DEFAULT_COLOR
-					end
-				end
-				-- Update anchored debug disc to follow NPC position
-				if entry.debugDisc then
-					local rootPart = entry.model.PrimaryPart
-					if rootPart then
-						entry.debugDisc.CFrame = CFrame.new(rootPart.Position.X, 0.15, rootPart.Position.Z)
-							* CFrame.Angles(0, 0, math.rad(90))
-					end
-				end
+				DebugVisuals.updateTick(entry)
 			end
 		end)
 	)
@@ -488,70 +393,7 @@ function NPCManager.setDebugVisualEnabled(npcName: string, visualType: string, e
 		log:warn(`setDebugVisualEnabled: NPC "{npcName}" not found`)
 		return
 	end
-
-	if visualType == "disc" then
-		if entry.debugDisc then
-			entry.debugDisc.Transparency = if enabled then 0.85 else 1
-		end
-	elseif visualType == "stateLabel" then
-		local head = entry.model:FindFirstChild("Head")
-		if head then
-			local billboard = head:FindFirstChild("StateLabelGui")
-			if billboard and billboard:IsA("BillboardGui") then
-				billboard.Enabled = enabled
-			end
-		end
-	elseif visualType == "waypoints" then
-		if entry.debugFolder then
-			for _, child in entry.debugFolder:GetChildren() do
-				if child:IsA("BasePart") then
-					child.Transparency = if enabled then 0.5 else 1
-				elseif child:IsA("BillboardGui") then
-					child.Enabled = enabled
-				end
-			end
-		end
-	elseif visualType == "wanderBeam" then
-		entry._wanderBeamVisible = enabled
-		-- Toggle existing instances if they exist right now
-		if entry.wanderTargetMarker then
-			entry.wanderTargetMarker.Transparency = if enabled then 0.3 else 1
-		end
-		if entry.wanderNpcAttachment then
-			local beam = entry.wanderNpcAttachment:FindFirstChildOfClass("Beam")
-			if beam then
-				beam.Transparency = NumberSequence.new(if enabled then 0.5 else 1)
-			end
-		end
-	elseif visualType == "chasePath" then
-		-- Toggle chase/guard path dots (the small spheres along computed path)
-		entry.pathfinder:setVisualizeEnabled(enabled)
-	elseif visualType == "nameLabel" then
-		-- Toggle the NPC display name BillboardGui above head
-		local head = entry.model:FindFirstChild("Head")
-		if head then
-			-- Name label is a BillboardGui that is NOT named "StateLabelGui"
-			for _, child in head:GetChildren() do
-				if child:IsA("BillboardGui") and child.Name ~= "StateLabelGui" then
-					child.Enabled = enabled
-				end
-			end
-		end
-	elseif visualType == "waypointNumbers" then
-		-- Toggle just the number BillboardGuis on waypoint markers (not the spheres)
-		if entry.debugFolder then
-			for _, child in entry.debugFolder:GetChildren() do
-				if child:IsA("BasePart") then
-					local billboard = child:FindFirstChildOfClass("BillboardGui")
-					if billboard then
-						billboard.Enabled = enabled
-					end
-				end
-			end
-		end
-	else
-		log:warn(`setDebugVisualEnabled: unknown visualType "{visualType}"`)
-	end
+	DebugVisuals.setVisualEnabled(entry, visualType, enabled)
 end
 
 --- Get an NPC's current world position (or nil if not found).
@@ -596,12 +438,7 @@ function NPCManager.cleanup(): ()
 		end
 		-- Then destroy the pathfinder (disconnects Path.Blocked, Humanoid.Died, etc.)
 		entry.pathfinder:destroy()
-		if entry.debugFolder then
-			entry.debugFolder:Destroy()
-		end
-		if entry.debugDisc then
-			entry.debugDisc:Destroy()
-		end
+		DebugVisuals.cleanupEntry(entry)
 		if entry.model then
 			entry.model:Destroy()
 		end
