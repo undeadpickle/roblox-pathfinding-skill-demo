@@ -3,7 +3,7 @@ name: roblox-npc-pathfinding
 description: "Production-grade NPC pathfinding for Roblox using PathfindingService + state machines. Interactive wizard generates NPCPathfinder, state machine, and behavior code. Use when: adding NPC pathfinding, creating chase/patrol/wander/guard NPCs, fixing NPC movement, auditing pathfinding code, or building NPC AI. Applies to humanoid character models. Supports Luau."
 metadata:
   author: custom
-  version: 2.1.0
+  version: 2.2.0
   category: game-development
   tags: [roblox, luau, npc, pathfinding, ai, game-dev, state-machine]
 ---
@@ -25,7 +25,8 @@ This skill generates a 3-layer NPC pathfinding system:
 | Module | Role |
 |--------|------|
 | `BehaviorHelpers` (`assets/behavior-helpers.luau`) | Shared utilities: `findNearestPlayer`, `detectNearestPlayerInRange`, `getRandomPointInRadius`, `evaluateChaseTarget`, `createWaypointMarkers`, `clearCache` |
-| `NPCManager` (documented pattern, not an asset) | Centralized spawning, state machine wiring, tick loop, lifecycle cleanup. Too project-specific to ship as a generic asset. |
+| `DebugVisuals` (documented pattern, not an asset) | Debug visualization: state labels, detection discs, visual toggling, per-frame updates, cleanup. Separated from NPCManager to isolate presentation from NPC lifecycle. |
+| `NPCManager` (documented pattern, not an asset) | Centralized spawning, state machine wiring, tick loop, lifecycle cleanup. Delegates debug visuals to `DebugVisuals`. Too project-specific to ship as a generic asset. |
 
 **Data flow:** NPCManager spawns models, creates pathfinders, creates state machines with behavior state maps, and runs a single `PostSimulation` tick loop. Each tick calls `stateMachine:update(dt)`. State hooks call pathfinder methods (`followTarget`, `patrol`, `moveTo`, `stop`) to drive movement.
 
@@ -573,6 +574,10 @@ type NPCEntry = {
     pathfinder: typeof(NPCPathfinder.new(nil :: any)),
     stateMachine: typeof(NPCStateMachine.new("" :: any, {} :: any, {} :: any)),
     behaviorType: string,
+    -- Debug visual fields (populated by DebugVisuals, read by behavior states)
+    debugFolder: Folder?,
+    debugDisc: Part?,
+    stateLabel: TextLabel?,
     -- ...behavior-specific fields populated by state hooks (chaseTarget, wanderThread, etc.)
 }
 
@@ -599,7 +604,11 @@ local function spawnNPC(name: string, position: Vector3, stateMap, initialState:
         behaviorType = name,
     }
 
-    entry.stateMachine = NPCStateMachine.new(initialState, stateMap, entry)
+    -- Debug visuals (delegated to DebugVisuals module)
+    entry.stateLabel = DebugVisuals.createStateLabel(model)
+    entry.stateMachine = NPCStateMachine.new(initialState, stateMap, entry,
+        DebugVisuals.makeStateLabelUpdater(name, entry.stateLabel, getDebugCallback)
+    )
     activeNPCs[name] = entry
 end
 ```
@@ -612,6 +621,7 @@ local RunService = game:GetService("RunService")
 RunService.PostSimulation:Connect(function(dt)
     for _, entry in activeNPCs do
         entry.stateMachine:update(dt)
+        DebugVisuals.updateTick(entry) -- LOS countdown annotation + disc position
     end
 end)
 ```
@@ -627,6 +637,7 @@ local function cleanup()
         end
         -- Then destroy the pathfinder (disconnects Path.Blocked, Humanoid.Died, etc.)
         entry.pathfinder:destroy()
+        DebugVisuals.cleanupEntry(entry) -- destroy debug instances
         -- Then destroy the model
         if entry.model then
             entry.model:Destroy()
@@ -639,7 +650,41 @@ end
 game:BindToClose(cleanup)
 ```
 
-**Order matters:** Destroy state machine -> pathfinder -> model. The state machine's `destroy()` calls `onExit` on the current state, which cancels threads and stops the pathfinder cleanly. Destroying in the wrong order leaves orphaned threads.
+**Order matters:** Destroy state machine -> pathfinder -> debug visuals -> model. The state machine's `destroy()` calls `onExit` on the current state, which cancels threads and stops the pathfinder cleanly. Destroying in the wrong order leaves orphaned threads.
+
+### DebugVisuals Pattern
+
+Debug visualization is separated from NPCManager into a `DebugVisuals` module to keep NPC lifecycle logic focused. DebugVisuals owns creation, toggling, per-frame updates, and cleanup of debug instances. Too project-specific to ship as an asset.
+
+**API:**
+
+```lua
+local DebugVisuals = {}
+
+-- Creation (gated by GameConfig.GAME.DEBUG)
+DebugVisuals.createStateLabel(model: Model): TextLabel?
+DebugVisuals.createDetectionRadiusCircle(model: Model, radius: number, color: Color3): Part?
+
+-- State label updater (returns callback for NPCStateMachine's 4th param)
+-- Uses getter function for debugStateCallback to handle late-binding:
+-- NPCManager.initialize runs before DebugService.initialize, so the callback
+-- is nil at spawn time. The getter preserves late-binding across module boundaries.
+DebugVisuals.makeStateLabelUpdater(npcName, stateLabel, getDebugCallback): callback?
+
+-- Toggle visuals by type (disc, stateLabel, waypoints, wanderBeam, chasePath, nameLabel, waypointNumbers)
+DebugVisuals.setVisualEnabled(entry: any, visualType: string, enabled: boolean)
+
+-- Per-frame: LOS countdown annotation on state labels + disc position following
+DebugVisuals.updateTick(entry: any)
+
+-- Cleanup: destroy debugFolder and debugDisc
+DebugVisuals.cleanupEntry(entry: any)
+```
+
+**Key design decisions:**
+- Functions take `entry: any` (NPCEntry) as parameter — no internal state registry, no circular dependency with NPCManager
+- `makeStateLabelUpdater` receives a getter function (`function() return debugStateCallback end`), not the callback value. This preserves late-binding when the callback variable lives in a different module scope.
+- Both `makeStateLabelUpdater` and `updateTick` write to `stateLabel.Text` — `updateTick` overwrites during LOS countdown (intentional, PostSim wins same frame)
 
 ## 7. Gotchas and Lessons (Code Generation Rules)
 
