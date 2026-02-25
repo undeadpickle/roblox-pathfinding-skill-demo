@@ -36,10 +36,6 @@ local success, err = pcall(function()
 			task.spawn(onPlayerAdded, player)
 		end
 
-		-- Build map geometry before NPCs so navmesh includes obstacles
-		local MapSetup = require(script.modules.MapSetup)
-		MapSetup.initialize()
-
 		-- Initialize NPC pathfinding system
 		local NPCManager = require(script.modules.NPCManager)
 		NPCManager.initialize()
@@ -51,7 +47,6 @@ local success, err = pcall(function()
 		-- Clean up NPC threads and instances on server shutdown
 		game:BindToClose(function()
 			NPCManager.cleanup()
-			MapSetup.cleanup()
 		end)
 	end
 

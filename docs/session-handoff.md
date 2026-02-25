@@ -1,38 +1,34 @@
 # Session Handoff
 
-> Updated: 2026-02-25 (Session 17)
-> Focus: Separation of concerns audit + DebugVisuals extraction from NPCManager
+> Updated: 2026-02-25 (Session 18)
+> Focus: Migrate obstacles from runtime generation to permanent Studio placement
 
 ---
 
 ## What Got Done
 
-### Separation of Concerns Audit
-Full codebase audit across all server, client, and shared modules. Rated B+ overall. Key findings: clean layering, good module cohesion, but debug visualization scattered across NPCManager, behavior states, and BehaviorHelpers. NPCManager identified as approaching God Object status (~40% debug code).
+### Obstacle Migration to Studio
+Moved all 24 obstacle parts (16 walls/blocks + 8 staircase steps) from runtime config-driven generation to permanent Studio-placed instances via MCP `run_code`. Idempotent script destroys and recreates `Workspace.Obstacles` folder.
 
-### DebugVisuals Extraction
-Extracted all debug visual concerns from NPCManager into a new `DebugVisuals.luau` module:
-- `createStateLabel` / `makeStateLabelUpdater` — state label creation + transition updates
-- `createDetectionRadiusCircle` — detection disc creation
-- `setVisualEnabled` — all 7 toggle branches (disc, stateLabel, waypoints, wanderBeam, chasePath, nameLabel, waypointNumbers)
-- `updateTick` — per-frame LOS countdown annotation + disc position following
-- `cleanupEntry` — debug instance destruction
+### Code Cleanup
+- **Deleted** `src/server/modules/MapSetup.luau` — runtime obstacle generator (76 lines)
+- **Removed** `GameConfig.MAP` section from `src/shared/GameConfig.luau` (120 lines of obstacle config)
+- **Removed** MapSetup require, initialize, and cleanup calls from `src/server/init.server.luau`
 
-NPCManager dropped from 615 to 452 lines. Zero behavior state files changed.
-
-### GameConfig Type Fix
-Fixed Luau `--!strict` type error on OBSTACLES array — staircase entry was missing `size` field. Added `size = Vector3.zero` dummy field to satisfy array type inference.
+### Docs Cleanup
+- **CLAUDE.md** — Removed MapSetup from Key Modules, updated GameConfig description, rewrote Map & Obstacles section to reflect Studio-placed parts
+- **docs/luau-patterns.md** — Updated Init Order pattern example to use existing modules (NPCManager, DebugService) instead of deleted MapSetup
 
 ## Files Changed
 
 ### Source
-- `src/server/modules/DebugVisuals.luau` — **New** — extracted debug visual module
-- `src/server/modules/NPCManager.luau` — Removed debug functions, delegates to DebugVisuals
-- `src/shared/GameConfig.luau` — Added `size = Vector3.zero` to staircase obstacle entry
+- `src/server/modules/MapSetup.luau` — **Deleted**
+- `src/server/init.server.luau` — Removed MapSetup require/init/cleanup (3 lines)
+- `src/shared/GameConfig.luau` — Removed `GameConfig.MAP` block (lines 52-170)
 
 ### Docs
-- `CLAUDE.md` — Added DebugVisuals to Key Modules, updated NPCManager description
-- `docs/lessons-learned.md` — 2 new entries (array type inference, cross-module callback pattern)
+- `CLAUDE.md` — MapSetup references removed, obstacle section rewritten
+- `docs/luau-patterns.md` — Init Order example updated
 - `docs/session-handoff.md` — This file
 
 ## What's Next
@@ -47,7 +43,7 @@ Fixed Luau `--!strict` type error on OBSTACLES array — staircase entry was mis
 5. **Batch 4**: Event log (timestamped state transitions) + Player state inspector
 
 ### Separation of Concerns Follow-ups (optional)
-6. **Extract behavior debug visuals** — Move waypoint marker creation from PatrolStates/GuardStates/WanderStates into DebugVisuals (lower priority, behavior states are acceptable as-is)
+6. **Extract behavior debug visuals** — Move waypoint marker creation from PatrolStates/GuardStates/WanderStates into DebugVisuals
 7. **Type the `ctx` parameter** — Define a typed `NpcContext` interface to replace `any` in behavior states and BehaviorHelpers
 8. **Remove unused Wally deps** — Promise, GoodSignal, Trove are installed but not imported
 
@@ -62,8 +58,9 @@ None.
 
 ## Key Architecture Notes for Next Session
 
-- **DebugVisuals uses a getter function for callbacks.** `makeStateLabelUpdater` receives `getDebugCallback` (a function that returns the current callback) instead of the callback value directly. This is because NPCManager.initialize runs before DebugService.initialize, so the callback is nil at NPC spawn time. The getter preserves late-binding.
-- **NPCEntry type still lives in NPCManager** with all debug fields (debugFolder, debugDisc, stateLabel, _wanderBeamVisible). Behavior states write to these fields directly. DebugVisuals reads them via `entry: any` parameters.
+- **Obstacles are now Studio-placed, not runtime-generated.** `Workspace.Obstacles` folder with 24 parts exists in the place file. Not in source code — similar to the SuburbanHouse model.
+- **BehaviorHelpers still references `Workspace.Obstacles` by name.** `getObstacleFolder()` caches `Workspace:FindFirstChild("Obstacles")` for wander raycast validation. No code changes were needed — it doesn't care how the folder got there.
+- **DebugVisuals uses a getter function for callbacks.** `makeStateLabelUpdater` receives `getDebugCallback` (a function that returns the current callback) instead of the callback value directly. Late-binding pattern because NPCManager.initialize runs before DebugService.initialize.
 - **House is MCP-constructed, not in source code.** The `SuburbanHouse` model exists only in the Studio place file. To rebuild, re-run the construction scripts (plan file: `.claude/plans/ethereal-wiggling-sonnet.md`).
 - **Staircase pathfinding may need tuning.** Steps are 1 stud high x ~1.17 studs deep. Default agent parameters (`AgentCanClimb = false`) may not handle stairs.
 - **NPCPathfinder type errors are expected.** The metatable OOP pattern (`setmetatable({}, Class)`) doesn't type-check under `--!strict`. These are false positives — ignore them.

@@ -406,12 +406,12 @@ end
 ```luau
 -- ❌ Bad: single pcall hides which module failed
 local success, err = pcall(function()
-    MapSetup.initialize()
     NPCManager.initialize()
+    DebugService.initialize()
     QuestSystem.initialize()
 end)
 if not success then
-    warn("Init failed:", err) -- Which module? Was NPCManager even attempted?
+    warn("Init failed:", err) -- Which module? Was DebugService even attempted?
 end
 
 -- ✅ Good: each module gets its own pcall with clear logging
@@ -423,17 +423,17 @@ local function safeInit(name: string, initFn: () -> ()): boolean
     return success
 end
 
-local mapOk = safeInit("MapSetup", MapSetup.initialize)
 local npcOk = safeInit("NPCManager", NPCManager.initialize)
+local debugOk = safeInit("DebugService", DebugService.initialize)
 local questOk = safeInit("QuestSystem", QuestSystem.initialize)
 
 -- Now you know exactly what succeeded and can make informed decisions
-if not mapOk then
-    warn("[Init] Map failed — NPCs may path incorrectly")
+if not npcOk then
+    warn("[Init] NPCManager failed — NPCs won't spawn")
 end
 ```
 
-If modules have dependencies (NPCManager needs MapSetup to have run first), check the predecessor's result before attempting the dependent init.
+If modules have dependencies (DebugService needs NPCManager to have run first), check the predecessor's result before attempting the dependent init.
 
 ---
 

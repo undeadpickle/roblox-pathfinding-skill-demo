@@ -55,10 +55,9 @@ NPC pathfinding demo showcasing chase, patrol, wander, and guard behaviors using
 - `Packages/` — Wally dependencies (auto-generated, don't edit)
 
 ### Key Modules
-- `GameConfig` — Central configuration values (NPC config, map obstacles)
+- `GameConfig` — Central configuration values (NPC config, UI)
 - `Remotes` — Client-server communication helpers
 - `Logger` — Debug logging with [Server]/[Client] prefixes
-- `MapSetup` — Config-driven obstacle geometry spawner (reads `GameConfig.MAP.OBSTACLES`)
 - `NPCPathfinder` — PathfindingService wrapper with moveTo, patrol, followTarget, wander, hasLineOfSight, setVisualizeEnabled
 - `NPCStateMachine` — Generic finite state machine (shared, reusable for any system). Optional `onStateChanged` callback (4th param) fires on initial state and every transition.
 - `NPCManager` — Orchestrator: spawns NPCs, wires behavior state maps to pathfinder, manages lifecycle. Delegates debug visuals to `DebugVisuals`. Exposes `getAllNPCStatus()`, `setDebugVisualEnabled()`, `setDebugStateCallback()`, `getNPCPosition()`, `teleportNPC()` for debug panel. State definitions live in `behaviors/` modules.
@@ -90,12 +89,9 @@ NPC pathfinding demo showcasing chase, patrol, wander, and guard behaviors using
 - Chase path dot toggle uses `_visualizeOverride` pattern in NPCPathfinder so debug panel state persists across `followTarget` restarts during state transitions.
 
 ### Map & Obstacles
-- Obstacle geometry defined in `GameConfig.MAP.OBSTACLES` (position, size, color per obstacle)
-- `MapSetup.initialize()` creates anchored `CanCollide = true` Parts in a `Workspace.Obstacles` folder
-- Supports `type = "staircase"` entries: generates ascending steps from base position (+Z), configurable via `steps` and `stepSize`
+- Obstacle geometry is Studio-placed in `Workspace.Obstacles` (24 parts: walls, blocks, staircase steps). Not generated at runtime — placed via MCP `run_code`
 - PathfindingService auto-carves obstacles from navmesh — no pathfinder code changes needed
-- MapSetup runs before NPCManager so navmesh includes obstacles on first path computation
-- Wander target generation uses `Workspace:Raycast` to reject points inside obstacle footprints
+- Wander target generation uses `Workspace:Raycast` to reject points inside obstacle footprints (`BehaviorHelpers.getObstacleFolder()`)
 - Guard zone has 2 walls flanking patrol center to create LOS-breaking corridors
 - Chase NPC: `WALK_SPEED` 4, `DETECTION_RADIUS` 20, `REQUIRE_LOS` true, `LOS_MEMORY` 3s
 - Guard NPC: `WALK_SPEED` 10, `DETECTION_RADIUS` 18, `REQUIRE_LOS` true, `LOS_MEMORY` 5s, 5 waypoints in pentagon layout (north quadrant)
