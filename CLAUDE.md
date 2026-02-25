@@ -66,7 +66,7 @@ NPC pathfinding demo showcasing chase, patrol, wander, and guard behaviors using
 - `behaviors/PatrolStates` — Patrol NPC state definitions (Patrolling)
 - `behaviors/WanderStates` — Wander NPC state definitions (Wandering)
 - `behaviors/GuardStates` — Guard NPC state definitions (Guarding ↔ Chasing ↔ Returning)
-- `behaviors/BehaviorHelpers` — Shared utilities: findNearestPlayer, getRandomPointInRadius, createWaypointMarkers, evaluateChaseTarget
+- `behaviors/BehaviorHelpers` — Shared utilities: findNearestPlayer, detectNearestPlayerInRange, getRandomPointInRadius, createWaypointMarkers, evaluateChaseTarget
 - `DebugRemotes` — String constants for debug remote names (shared, single source of truth)
 - `DebugService` — Server-side handler bridging debug panel requests into NPCManager
 - `DebugPanel` — Client-side debug panel logic (toggle, polling, remote calls)
@@ -81,7 +81,7 @@ NPC pathfinding demo showcasing chase, patrol, wander, and guard behaviors using
 - Collision group "NPCs" prevents NPC-to-NPC physics jitter
 - `game:BindToClose` ensures cleanup on server shutdown
 - Chase `followTarget` uses continuous-motion loop (0.1s tick) with event-driven waypoint advancement (`MoveToFinished`), timer-based path recomputation, stuck detection + auto-jump recovery
-- Guard detection: distance + LOS raycast (via `hasLineOfSight`) to initiate chase, distance-only to maintain chase (prevents LOS flicker at wall edges). Returns to nearest waypoint when target lost.
+- Guard detection: distance + LOS raycast (via `hasLineOfSight`) to initiate chase, LOS memory timer during chase (counts down when sight lost, drops target when expired). Returns to nearest waypoint when target lost.
 - `hasLineOfSight(targetPos, excludeModels?)` is public on NPCPathfinder. Raycasts from NPC root to target, excluding the NPC model and optionally additional models (e.g., the target player's character).
 - Debug visuals gated by `GameConfig.GAME.DEBUG`: state labels above heads, detection radius disc (chase=red, guard=orange, anchored + tick-updated), waypoint spheres (chase path, color-coded), patrol waypoint markers (yellow), guard waypoint markers (orange, no lines — random order), wander beam + target marker
 - Debug panel (F8 toggle): live NPC status readout, per-visual toggles (disc, stateLabel, chasePath, waypoints, waypointNumbers, nameLabel, wanderBeam) with Toggle All master switch, teleport (spawn zone, NPC current pos, summon NPC to player). Client polls server every 0.5s + push events for instant state changes.
@@ -96,8 +96,10 @@ NPC pathfinding demo showcasing chase, patrol, wander, and guard behaviors using
 - MapSetup runs before NPCManager so navmesh includes obstacles on first path computation
 - Wander target generation uses `Workspace:Raycast` to reject points inside obstacle footprints
 - Guard zone has 2 walls flanking patrol center to create LOS-breaking corridors
-- Chase NPC: `WALK_SPEED` 8, `DETECTION_RADIUS` 15
-- Guard NPC: `WALK_SPEED` 10, `DETECTION_RADIUS` 18, 5 waypoints in pentagon layout (north quadrant)
+- Chase NPC: `WALK_SPEED` 4, `DETECTION_RADIUS` 20, `REQUIRE_LOS` true, `LOS_MEMORY` 3s
+- Guard NPC: `WALK_SPEED` 10, `DETECTION_RADIUS` 18, `REQUIRE_LOS` true, `LOS_MEMORY` 5s, 5 waypoints in pentagon layout (north quadrant)
+- LOS detection: `REQUIRE_LOS = true` (default) blocks detection through walls; `LOS_MEMORY` adds a countdown timer when LOS is lost during chase — NPC gives up after N seconds without regaining sight. Both Chase and Guard support these. Set `REQUIRE_LOS = false` for omniscient NPCs; omit `LOS_MEMORY` for infinite chase persistence.
+- State label annotates LOS countdown in cyan during memory phase: `Chasing (3.0s)` → `Chasing (0.0s)` → transitions to lost state
 
 ### Suburban House (MCP-constructed, not in source)
 - Two-story suburban home built via MCP `run_code` directly in Studio (not config-driven)

@@ -51,6 +51,8 @@ type NPCEntry = {
 	-- Chase state fields (populated by state hooks)
 	chaseTarget: Model?,
 	chaseReevalTimer: number?,
+	-- LOS memory timer (shared by chase/guard, managed by evaluateChaseTarget)
+	losLostTimer: number?,
 	-- Wander state fields (populated by state hooks)
 	wanderThread: thread?,
 	wanderTargetMarker: Part?,
@@ -372,6 +374,21 @@ function NPCManager.initialize(): ()
 				if entry.stateMachine then
 					entry.stateMachine:update(dt)
 				end
+				-- Annotate state label during LOS memory countdown
+				if entry.stateLabel and entry.losLostTimer then
+					local memoryConfig: number? = nil
+					if entry.behaviorType == "chase" then
+						memoryConfig = GameConfig.NPC.CHASE.LOS_MEMORY
+					elseif entry.behaviorType == "guard" then
+						memoryConfig = GameConfig.NPC.GUARD.LOS_MEMORY
+					end
+					if memoryConfig then
+						local remaining = math.max(0, memoryConfig - entry.losLostTimer)
+						entry.stateLabel.Text = string.format("Chasing (%.1fs)", remaining)
+						entry.stateLabel.TextColor3 = GameConfig.NPC.STATE_LABEL.COLORS.Returning
+							or GameConfig.NPC.STATE_LABEL.DEFAULT_COLOR
+					end
+				end
 				-- Update anchored debug disc to follow NPC position
 				if entry.debugDisc then
 					local rootPart = entry.model.PrimaryPart
@@ -435,11 +452,26 @@ function NPCManager.getAllNPCStatus(playerPosition: Vector3): { [string]: any }
 			end
 		end
 
+		-- LOS memory countdown (when NPC has lost sight but is still pursuing)
+		local losCountdown: number? = nil
+		if entry.losLostTimer then
+			local memoryConfig: number? = nil
+			if entry.behaviorType == "chase" then
+				memoryConfig = GameConfig.NPC.CHASE.LOS_MEMORY
+			elseif entry.behaviorType == "guard" then
+				memoryConfig = GameConfig.NPC.GUARD.LOS_MEMORY
+			end
+			if memoryConfig then
+				losCountdown = math.floor(math.max(0, memoryConfig - entry.losLostTimer) * 10) / 10
+			end
+		end
+
 		result[name] = {
 			state = state,
 			position = npcPos,
 			distanceToPlayer = math.floor(distance * 10) / 10,
 			hasLOS = hasLOS,
+			losCountdown = losCountdown,
 			isMoving = isMoving,
 			walkSpeed = walkSpeed,
 			detectionRadius = detectionRadius,

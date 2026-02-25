@@ -126,3 +126,9 @@
 - **[MCP]** Don't try to build complex multi-part geometry through MapSetup/GameConfig when iterating on layout. Use `run_code` to execute a self-contained Luau construction script directly in Studio — it's faster to iterate (edit script, re-run), idempotent (destroy + recreate), and doesn't bloat source files. Move to config-driven only once the layout is finalized and needs to persist across sessions.
 
 - **[MCP]** Don't build multi-story geometry in a single monolithic script. Split into per-floor scripts that modify the same Model — each stays under token limits and is independently re-runnable. The second script can reference parts created by the first.
+
+## Session: 2026-02-25 — LOS Detection & Memory Timer
+
+- **[Architecture]** Don't gate initial detection on LOS without also adding a memory timer for chase maintenance. Distance-only chase maintenance creates a broken mental model: walls matter for detection but not escape. Use `LOS_MEMORY` (configurable seconds) so NPCs give up after losing sight, completing the stealth loop (Alert → Pursuit → Memory → Disengage).
+
+- **[Architecture]** Don't add visual debug state by creating new systems. Annotate the existing state label in the PostSimulation tick — the state machine's `onStateChanged` callback naturally restores it on the next transition, so no cleanup is needed.

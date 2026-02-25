@@ -1,41 +1,53 @@
 # Session Handoff
 
-> Updated: 2026-02-24 (Session 15)
-> Focus: Suburban house interior construction (two-story, MCP-built)
+> Updated: 2026-02-25 (Session 16)
+> Focus: LOS detection system — REQUIRE_LOS config, LOS_MEMORY timer, debug indicators
 
 ---
 
 ## What Got Done
 
-### Suburban House Construction
+### LOS Detection for Chase & Guard NPCs
 
-Built a complete two-story suburban home interior in Roblox Studio via MCP `run_code`. The house is a `SuburbanHouse` Model in Workspace with 96 parts, placed well clear of the existing NPC demo area (world X:80-210).
+Added configurable line-of-sight detection to Chase and Guard NPCs. Previously, Chase NPC used distance-only detection (could see through walls). Now both behaviors use `REQUIRE_LOS` (on by default) with shared helpers.
 
-**First Floor (Y=0):**
-- 9 rooms: Living Room (30x60), Kitchen/Dining (30x26), Master Bedroom (40x26), Corridor (70x8), Entrance Hall (L-shaped, split for stairwell), Bedroom 2 (22x26), Bathroom (14x26), Utility Room (12x26), Garage (30x40)
-- Color-coded floors per room (warm wood, cream tile, blue-grey carpet, etc.)
-- Front door opening (south wall), garage door (14-stud wide, east wall), utility-to-garage door
-- Open-plan kitchen (20-stud opening to corridor)
-- 12-step staircase in entrance hall (ascending south-to-north, Y=1 to Y=13)
+**Changes:**
+- New `detectNearestPlayerInRange()` shared helper in BehaviorHelpers — replaces inline detection in both Chase and Guard states
+- Guard's 26-line local `detectPlayerWithLOS` function removed in favor of shared helper
+- Chase Idle state now respects walls (previously distance-only)
 
-**Second Floor (Y=13):**
-- 6 rooms: Bedroom 3 (36x30), Bedroom 4 (36x30), Landing/Hallway (20x60, split into 4 parts), Master Suite (44x34), Upstairs Bath (22x26), Master Ensuite (22x26)
-- Stairwell void in landing floor (no floor over X=40..52, Z=34..48)
-- Stairwell safety walls on 3 sides (north open = exit onto landing)
-- All rooms have doorway openings to landing/hallway
+### LOS Memory Timer
 
-**Construction approach:**
-- Two Luau scripts executed via `mcp__roblox-studio__run_code`
-- Script 1: First floor (rebuilt with staircase modifications)
-- Script 2: Second floor (added to existing model)
-- Idempotent: destroys and recreates on re-run
-- Plan file: `.claude/plans/ethereal-wiggling-sonnet.md`
+Added `LOS_MEMORY` config to both Chase (3s) and Guard (5s) NPCs. When an NPC loses line of sight during a chase, it continues pursuing for N seconds before giving up. Completes the stealth loop: walls block detection AND allow escape.
+
+**Changes:**
+- `evaluateChaseTarget` in BehaviorHelpers now checks LOS each tick when `LOS_MEMORY` is configured, accumulates `ctx.losLostTimer`, and drops target when timer expires
+- Timer resets when LOS is regained
+- Timer clears on state exit and target-switch paths
+- Backward compatible: `nil` LOS_MEMORY = no LOS checking during chase (original behavior)
+
+### Debug Indicators
+
+- **State label annotation:** During LOS memory countdown, state label changes from "Chasing" (red) to "Chasing (3.0s)" (cyan), counting down in real time. Restores automatically on state transition.
+- **Console logging:** BehaviorHelpers now logs LOS events: "LOS lost — memory countdown started", "LOS still blocked — Xs remaining", "LOS memory expired — dropping target", "LOS regained — resetting memory timer"
+- **Debug panel:** `LOS: No (2.0s)` shown during countdown (was just `LOS: Yes/No`)
+
+### Config Tweaks (user-initiated)
+- Chase NPC: `WALK_SPEED` 8→4, `DETECTION_RADIUS` 35→20
 
 ## Files Changed
 
+### Source
+- `src/shared/GameConfig.luau` — Added `REQUIRE_LOS`, `LOS_MEMORY` to CHASE and GUARD configs; adjusted Chase speed/radius
+- `src/server/modules/behaviors/BehaviorHelpers.luau` — Added Logger, `detectNearestPlayerInRange()`, expanded `evaluateChaseTarget` with LOS memory + logging
+- `src/server/modules/behaviors/ChaseStates.luau` — Replaced inline detection with shared helper, added `losLostTimer` cleanup
+- `src/server/modules/behaviors/GuardStates.luau` — Removed local detection function, switched to shared helper, added `losLostTimer` cleanup
+- `src/server/modules/NPCManager.luau` — Added `losLostTimer` to NPCEntry type, state label countdown annotation in PostSimulation tick, expanded status reporting
+- `src/client/modules/DebugPanel.luau` — LOS countdown display in status readout
+
 ### Docs
-- `CLAUDE.md` — Added "Suburban House" subsection under Map & Obstacles
-- `docs/lessons-learned.md` — 2 new entries (MCP construction patterns)
+- `CLAUDE.md` — Updated Chase/Guard config values, added LOS system notes, updated BehaviorHelpers description
+- `docs/lessons-learned.md` — 2 new entries (LOS detection + debug annotation patterns)
 - `docs/session-handoff.md` — This file
 
 ## What's Next
@@ -61,10 +73,11 @@ None.
 
 ## Key Architecture Notes for Next Session
 
-- **House is MCP-constructed, not in source code.** The `SuburbanHouse` model exists only in the Studio place file. It's not created by MapSetup or GameConfig. To rebuild, re-run the construction scripts (see plan file for the complete Luau code).
-- **Staircase pathfinding may need tuning.** Steps are 1 stud high x ~1.17 studs deep. Default PathfindingService agent parameters (`AgentCanClimb = false`) may not handle stairs. Options: enable `AgentCanClimb`, reduce step height, or use a ramp instead.
-- **No collision group on house parts.** House walls are standard Parts (no collision group). NPCs using the "NPCs" collision group will collide with walls normally, which is correct behavior.
-- **Second floor exterior walls are independent of first floor.** The F2 exterior walls sit at Y=14-26, directly above F1 exterior walls at Y=1-13. They're separate Parts, not extensions.
+- **LOS system is config-driven.** Set `REQUIRE_LOS = false` to disable wall-blocking. Set `LOS_MEMORY = nil` (or omit) to chase forever once spotted. Both are per-NPC-type in GameConfig.
+- **`ctx.losLostTimer` is a shared field.** Both Chase and Guard use the same `ctx.losLostTimer` field — it's reset in `onExit` of each Chasing state. If adding a new behavior with chase, follow the same pattern.
+- **State label countdown is ephemeral.** The PostSimulation tick annotates the label; `onStateChanged` callback restores it. No cleanup needed, but the annotation only works when `GAME.DEBUG = true` (stateLabel is only created in debug mode).
+- **House is MCP-constructed, not in source code.** The `SuburbanHouse` model exists only in the Studio place file. To rebuild, re-run the construction scripts (plan file: `.claude/plans/ethereal-wiggling-sonnet.md`).
+- **Staircase pathfinding may need tuning.** Steps are 1 stud high x ~1.17 studs deep. Default agent parameters (`AgentCanClimb = false`) may not handle stairs.
 
 ---
 

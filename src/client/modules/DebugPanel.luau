@@ -52,7 +52,11 @@ local function formatMetrics(data: { [string]: any }): string
 	table.insert(parts, `Dist: {data.distanceToPlayer}`)
 
 	if data.hasLOS ~= nil then
-		table.insert(parts, `LOS: {if data.hasLOS then "Yes" else "No"}`)
+		if data.losCountdown then
+			table.insert(parts, `LOS: No ({data.losCountdown}s)`)
+		else
+			table.insert(parts, `LOS: {if data.hasLOS then "Yes" else "No"}`)
+		end
 	end
 
 	table.insert(parts, `Moving: {if data.isMoving then "Yes" else "No"}`)

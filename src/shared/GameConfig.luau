@@ -197,6 +197,7 @@ GameConfig.NPC = table.freeze({
 		ARRIVAL_DISTANCE = 5,
 		REEVALUATE_INTERVAL = 3,
 		REQUIRE_LOS = true, -- Walls block detection; set false to see through walls
+		LOS_MEMORY = 3, -- Seconds to chase after losing sight (nil = omniscient)
 	}),
 
 	-- Patrol NPC: walks a rectangular route
@@ -224,6 +225,7 @@ GameConfig.NPC = table.freeze({
 		PATROL_PAUSE = 1.5,
 		RETURN_DWELL = 0.8,
 		REQUIRE_LOS = true, -- Walls block detection; set false to see through walls
+		LOS_MEMORY = 5, -- Seconds to chase after losing sight (nil = omniscient); guards are more persistent
 		WAYPOINTS = table.freeze({
 			Vector3.new(10, 5, 25),
 			Vector3.new(15, 5, 45),

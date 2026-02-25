@@ -60,6 +60,7 @@ local ChaseStates: NPCStateMachine.StateMap = {
 		onExit = function(ctx: any)
 			ctx.pathfinder:stop()
 			ctx.chaseReevalTimer = nil
+			ctx.losLostTimer = nil
 		end,
 	},
 }

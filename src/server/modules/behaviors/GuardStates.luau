@@ -106,6 +106,7 @@ local GuardStates: NPCStateMachine.StateMap = {
 		onExit = function(ctx: any)
 			ctx.pathfinder:stop()
 			ctx.guardReevalTimer = nil
+			ctx.losLostTimer = nil
 		end,
 	},
 
