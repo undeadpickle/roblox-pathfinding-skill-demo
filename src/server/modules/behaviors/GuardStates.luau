@@ -23,7 +23,7 @@ local GUARD_COLOR = Color3.fromRGB(255, 139, 0) -- Orange
 local GuardStates: NPCStateMachine.StateMap = {
 	Guarding = {
 		onEnter = function(ctx: any)
-			local config = GameConfig.NPC.GUARD
+			local config = ctx.behaviorConfig
 
 			if GameConfig.GAME.DEBUG and not ctx.debugFolder then
 				ctx.debugFolder = BehaviorHelpers.createWaypointMarkers(config.WAYPOINTS, GUARD_COLOR, false)
@@ -54,12 +54,12 @@ local GuardStates: NPCStateMachine.StateMap = {
 		onUpdate = function(ctx: any, dt: number): string?
 			-- Throttle detection (no need to raycast every frame)
 			ctx.guardDetectTimer = (ctx.guardDetectTimer or 0) + dt
-			if ctx.guardDetectTimer < GameConfig.NPC.GUARD.DETECT_INTERVAL then
+			if ctx.guardDetectTimer < ctx.behaviorConfig.DETECT_INTERVAL then
 				return nil
 			end
 			ctx.guardDetectTimer = 0
 
-			return BehaviorHelpers.detectNearestPlayerInRange(ctx, GameConfig.NPC.GUARD, "guardTarget", "Chasing")
+			return BehaviorHelpers.detectNearestPlayerInRange(ctx, ctx.behaviorConfig, "activeTarget", "Chasing")
 		end,
 
 		onExit = function(ctx: any)
@@ -74,12 +74,12 @@ local GuardStates: NPCStateMachine.StateMap = {
 
 	Chasing = {
 		onEnter = function(ctx: any)
-			local target = ctx.guardTarget
+			local target = ctx.activeTarget
 			if not target then
 				return
 			end
 
-			local config = GameConfig.NPC.GUARD
+			local config = ctx.behaviorConfig
 			ctx.pathfinder:followTarget(target, {
 				recomputeInterval = config.RECOMPUTE_INTERVAL,
 				arrivalDistance = config.ARRIVAL_DISTANCE,
@@ -93,14 +93,14 @@ local GuardStates: NPCStateMachine.StateMap = {
 		onUpdate = function(ctx: any, dt: number): string?
 			-- Throttle re-evaluation
 			ctx.guardReevalTimer = (ctx.guardReevalTimer or 0) + dt
-			if ctx.guardReevalTimer < GameConfig.NPC.GUARD.REEVALUATE_INTERVAL then
+			if ctx.guardReevalTimer < ctx.behaviorConfig.REEVALUATE_INTERVAL then
 				return nil
 			end
 			ctx.guardReevalTimer = 0
 
 			-- Distance-only check to maintain chase (no LOS flicker at wall edges)
 			-- LOS required to switch to a closer target
-			return BehaviorHelpers.evaluateChaseTarget(ctx, GameConfig.NPC.GUARD, "guardTarget", "Returning", true)
+			return BehaviorHelpers.evaluateChaseTarget(ctx, ctx.behaviorConfig, "activeTarget", "Returning", true)
 		end,
 
 		onExit = function(ctx: any)
@@ -121,7 +121,7 @@ local GuardStates: NPCStateMachine.StateMap = {
 			end
 
 			-- Find nearest waypoint
-			local waypoints = GameConfig.NPC.GUARD.WAYPOINTS
+			local waypoints = ctx.behaviorConfig.WAYPOINTS
 			local nearestIndex = 1
 			local nearestDist = math.huge
 			for i, wp in waypoints do
@@ -145,7 +145,7 @@ local GuardStates: NPCStateMachine.StateMap = {
 			if ctx.guardReachedWaypoint then
 				-- Minimum dwell so "Returning" is observable in debug panel
 				ctx.guardReturnDwell = (ctx.guardReturnDwell or 0) + dt
-				if ctx.guardReturnDwell >= GameConfig.NPC.GUARD.RETURN_DWELL then
+				if ctx.guardReturnDwell >= ctx.behaviorConfig.RETURN_DWELL then
 					return "Guarding"
 				end
 				return nil
@@ -153,12 +153,12 @@ local GuardStates: NPCStateMachine.StateMap = {
 
 			-- Throttle detection during return (can interrupt to chase)
 			ctx.guardDetectTimer = (ctx.guardDetectTimer or 0) + dt
-			if ctx.guardDetectTimer < GameConfig.NPC.GUARD.DETECT_INTERVAL then
+			if ctx.guardDetectTimer < ctx.behaviorConfig.DETECT_INTERVAL then
 				return nil
 			end
 			ctx.guardDetectTimer = 0
 
-			return BehaviorHelpers.detectNearestPlayerInRange(ctx, GameConfig.NPC.GUARD, "guardTarget", "Chasing")
+			return BehaviorHelpers.detectNearestPlayerInRange(ctx, ctx.behaviorConfig, "activeTarget", "Chasing")
 		end,
 
 		onExit = function(ctx: any)

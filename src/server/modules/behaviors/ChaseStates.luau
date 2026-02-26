@@ -24,18 +24,18 @@ local ChaseStates: NPCStateMachine.StateMap = {
 		end,
 
 		onUpdate = function(ctx: any, _dt: number): string?
-			return BehaviorHelpers.detectNearestPlayerInRange(ctx, GameConfig.NPC.CHASE, "chaseTarget", "Chasing")
+			return BehaviorHelpers.detectNearestPlayerInRange(ctx, ctx.behaviorConfig, "activeTarget", "Chasing")
 		end,
 	},
 
 	Chasing = {
 		onEnter = function(ctx: any)
-			local target = ctx.chaseTarget
+			local target = ctx.activeTarget
 			if not target then
 				return
 			end
 
-			local config = GameConfig.NPC.CHASE
+			local config = ctx.behaviorConfig
 			ctx.pathfinder:followTarget(target, {
 				recomputeInterval = config.RECOMPUTE_INTERVAL,
 				arrivalDistance = config.ARRIVAL_DISTANCE,
@@ -48,18 +48,18 @@ local ChaseStates: NPCStateMachine.StateMap = {
 
 		onUpdate = function(ctx: any, dt: number): string?
 			-- Throttle re-evaluation (no need to check every frame)
-			ctx.chaseReevalTimer = (ctx.chaseReevalTimer or 0) + dt
-			if ctx.chaseReevalTimer < GameConfig.NPC.CHASE.REEVALUATE_INTERVAL then
+			ctx.reevalTimer = (ctx.reevalTimer or 0) + dt
+			if ctx.reevalTimer < ctx.behaviorConfig.REEVALUATE_INTERVAL then
 				return nil
 			end
-			ctx.chaseReevalTimer = 0
+			ctx.reevalTimer = 0
 
-			return BehaviorHelpers.evaluateChaseTarget(ctx, GameConfig.NPC.CHASE, "chaseTarget", "Idle", false)
+			return BehaviorHelpers.evaluateChaseTarget(ctx, ctx.behaviorConfig, "activeTarget", "Idle", false)
 		end,
 
 		onExit = function(ctx: any)
 			ctx.pathfinder:stop()
-			ctx.chaseReevalTimer = nil
+			ctx.reevalTimer = nil
 			ctx.losLostTimer = nil
 		end,
 	},

@@ -60,12 +60,12 @@ NPC pathfinding demo showcasing chase, patrol, wander, and guard behaviors using
 - `Logger` — Debug logging with [Server]/[Client] prefixes
 - `NPCPathfinder` — PathfindingService wrapper with moveTo, patrol, followTarget, wander, hasLineOfSight, setVisualizeEnabled
 - `NPCStateMachine` — Generic finite state machine (shared, reusable for any system). Optional `onStateChanged` callback (4th param) fires on initial state and every transition.
-- `NPCManager` — Orchestrator: spawns NPCs, wires behavior state maps to pathfinder, manages lifecycle. Delegates debug visuals to `DebugVisuals`. Exposes `getAllNPCStatus()`, `setDebugVisualEnabled()`, `setDebugStateCallback()`, `getNPCPosition()`, `teleportNPC()` for debug panel. State definitions live in `behaviors/` modules.
+- `NPCManager` — Registry-based NPC orchestrator. Public API: `spawnNPC(config)` (creates rig + registers), `registerNPC(model, config)` (adopts pre-placed model), `despawnNPC(npcId)` (individual teardown), `initializeDemo()` (spawns original 4 demo NPCs from GameConfig). Also exposes `getAllNPCStatus()`, `setDebugVisualEnabled()`, `setDebugStateCallback()`, `getNPCPosition()`, `teleportNPC()` for debug panel. Internal BehaviorRegistry maps behavior type strings to state modules. State definitions live in `behaviors/` modules.
 - `DebugVisuals` — Debug visualization: state labels, detection discs, visual toggling (`setVisualEnabled`), per-frame debug updates (`updateTick`), cleanup. Extracted from NPCManager to separate presentation from NPC lifecycle.
-- `behaviors/ChaseStates` — Chase NPC state definitions (Idle ↔ Chasing)
-- `behaviors/PatrolStates` — Patrol NPC state definitions (Patrolling)
-- `behaviors/WanderStates` — Wander NPC state definitions (Wandering)
-- `behaviors/GuardStates` — Guard NPC state definitions (Guarding ↔ Chasing ↔ Returning)
+- `behaviors/ChaseStates` — Chase NPC state definitions (Idle ↔ Chasing). Reads from `ctx.behaviorConfig`, uses `ctx.activeTarget` for chase target.
+- `behaviors/PatrolStates` — Patrol NPC state definitions (Patrolling). Reads from `ctx.behaviorConfig`.
+- `behaviors/WanderStates` — Wander NPC state definitions (Wandering). Reads from `ctx.behaviorConfig`.
+- `behaviors/GuardStates` — Guard NPC state definitions (Guarding ↔ Chasing ↔ Returning). Reads from `ctx.behaviorConfig`, uses `ctx.activeTarget` for chase target.
 - `behaviors/BehaviorHelpers` — Shared utilities: findNearestPlayer, detectNearestPlayerInRange, getRandomPointInRadius, createWaypointMarkers, evaluateChaseTarget
 - `DebugRemotes` — String constants for debug remote names (shared, single source of truth)
 - `DebugService` — Server-side handler bridging debug panel requests into NPCManager
@@ -73,6 +73,9 @@ NPC pathfinding demo showcasing chase, patrol, wander, and guard behaviors using
 - `DebugPanelUI` — UI factory functions for debug panel elements (raw Roblox instances, no framework)
 
 ### NPC Pathfinding System
+- Registry-based NPC system: `spawnNPC(config)` creates R15 rigs, `registerNPC(model, config)` adopts pre-placed models, `despawnNPC(npcId)` tears down individual NPCs. `initializeDemo()` spawns the original 4 demo NPCs.
+- Config-driven behaviors: behavior type + config table passed at spawn/register time. Behavior modules read from `ctx.behaviorConfig` (not GameConfig). Chase/guard use `ctx.activeTarget` (standardized from old `chaseTarget`/`guardTarget`).
+- BehaviorRegistry maps string keys ("chase", "patrol", "wander", "guard") to state modules + initial states.
 - 4 demo NPCs: Chase (follows nearest player), Patrol (loops waypoints), Wander (random points in radius), Guard (random patrol + LOS-triggered chase + return-to-post)
 - Behavior driven by state machines: Chase (Idle ↔ Chasing), Patrol (Patrolling), Wander (Wandering), Guard (Guarding ↔ Chasing ↔ Returning)
 - Single PostSimulation tick drives all state machines; states call NPCPathfinder methods

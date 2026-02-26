@@ -23,7 +23,7 @@ local WANDER_COLOR = Color3.fromRGB(34, 197, 94) -- Green (Wandering state color
 local WanderStates: NPCStateMachine.StateMap = {
 	Wandering = {
 		onEnter = function(ctx: any)
-			local config = GameConfig.NPC.WANDER
+			local config = ctx.behaviorConfig
 
 			-- Debug: beam from NPC to current wander target + marker sphere
 			local targetMarker: Part? = nil

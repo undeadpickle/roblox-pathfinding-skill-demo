@@ -1,19 +1,17 @@
 --!strict
 --[[
-	NPCManager - Spawns and manages demo NPCs with different pathfinding behaviors.
+	NPCManager - Registry-based NPC manager for pathfinding behaviors.
 
-	Spawns 4 NPCs:
-	  - Chase NPC: pursues the nearest player
-	  - Patrol NPC: walks a rectangular loop
-	  - Wander NPC: roams randomly within a radius
-	  - Guard NPC: random patrol with LOS-triggered chase and return-to-post
+	Public API:
+	  - spawnNPC(config)       — create a runtime rig and register it
+	  - registerNPC(model, config) — adopt a pre-placed model
+	  - despawnNPC(npcId)      — individual teardown
+	  - initializeDemo()       — spawn the original 4 demo NPCs from GameConfig
+	  - cleanup()              — tear down all NPCs
 
 	Each NPC is driven by a state machine (NPCStateMachine) that manages behavior
 	transitions. The state machine ticks via a single RunService.PostSimulation
 	connection — states call into NPCPathfinder methods for actual movement.
-
-	NPCs are created as R15 rigs via Players:CreateHumanoidModelFromDescription().
-	Falls back to simple Part+Humanoid if R15 creation fails.
 
 	Behavior state definitions live in src/server/modules/behaviors/.
 ]]
@@ -42,19 +40,26 @@ local log = Logger.new("NPCManager")
 
 local NPCManager = {}
 
+-- ═══════════════════════════════════════════════════════════
+-- TYPES
+-- ═══════════════════════════════════════════════════════════
+
 type NPCEntry = {
 	model: Model,
 	pathfinder: typeof(NPCPathfinder.new(nil :: any)),
 	stateMachine: typeof(NPCStateMachine.new("" :: any, {} :: any, {} :: any)),
 	behaviorType: string,
+	behaviorConfig: { [string]: any },
+	spawnPosition: Vector3?,
 	debugFolder: Folder?,
 	debugDisc: Part?,
 	stateLabel: TextLabel?,
-	-- Chase state fields (populated by state hooks)
-	chaseTarget: Model?,
-	chaseReevalTimer: number?,
+	-- Standardized target field (used by chase-capable behaviors: chase, guard)
+	activeTarget: Model?,
 	-- LOS memory timer (shared by chase/guard, managed by evaluateChaseTarget)
 	losLostTimer: number?,
+	-- Re-evaluation timer (shared by chase-capable behaviors)
+	reevalTimer: number?,
 	-- Wander state fields (populated by state hooks)
 	wanderThread: thread?,
 	wanderTargetMarker: Part?,
@@ -63,7 +68,6 @@ type NPCEntry = {
 	_wanderBeamVisible: boolean?,
 	-- Guard state fields (populated by state hooks)
 	guardPatrolThread: thread?,
-	guardTarget: Model?,
 	guardReevalTimer: number?,
 	guardDetectTimer: number?,
 	guardLastWaypointIndex: number?,
@@ -71,12 +75,34 @@ type NPCEntry = {
 	guardReturnDwell: number?,
 }
 
+-- ═══════════════════════════════════════════════════════════
+-- INTERNAL STATE
+-- ═══════════════════════════════════════════════════════════
+
 local activeNPCs: { [string]: NPCEntry } = {}
 local moduleConnections: { RBXScriptConnection } = {}
 local debugStateCallback: ((npcName: string, newState: string, previousState: string?) -> ())? = nil
+local tickRunning = false
 
 -- ═══════════════════════════════════════════════════════════
--- NPC CREATION
+-- BEHAVIOR REGISTRY
+-- ═══════════════════════════════════════════════════════════
+
+local BehaviorRegistry: { [string]: { states: NPCStateMachine.StateMap, initialState: string } } = {
+	chase = { states = ChaseStates, initialState = "Idle" },
+	patrol = { states = PatrolStates, initialState = "Patrolling" },
+	wander = { states = WanderStates, initialState = "Wandering" },
+	guard = { states = GuardStates, initialState = "Guarding" },
+}
+
+-- Detection disc colors (only behaviors with DETECTION_RADIUS get a disc)
+local DISC_COLORS: { [string]: Color3 } = {
+	chase = Color3.fromRGB(239, 68, 68), -- Red
+	guard = Color3.fromRGB(255, 139, 0), -- Orange
+}
+
+-- ═══════════════════════════════════════════════════════════
+-- NPC CREATION (rig factory — unchanged)
 -- ═══════════════════════════════════════════════════════════
 
 local function createSimpleNPCModel(): Model
@@ -164,13 +190,74 @@ local function createNPCModel(displayName: string, spawnPosition: Vector3): Mode
 end
 
 -- ═══════════════════════════════════════════════════════════
--- SPAWNING
+-- INTERNAL HELPERS
 -- ═══════════════════════════════════════════════════════════
 
-local function spawnNPC(behaviorType: string, displayName: string, spawnPosition: Vector3): NPCEntry?
-	local model = createNPCModel(displayName, spawnPosition)
-	if not model then
-		log:error(`Failed to spawn {displayName}`)
+--- Late-binding getter for the debug state callback (DebugService sets it after NPCs spawn)
+local function getDebugCallback()
+	return debugStateCallback
+end
+
+--- Start the PostSimulation tick loop if not already running.
+local function ensureTickRunning(): ()
+	if tickRunning then
+		return
+	end
+	tickRunning = true
+
+	table.insert(
+		moduleConnections,
+		RunService.PostSimulation:Connect(function(dt: number)
+			for _, entry in activeNPCs do
+				if entry.stateMachine then
+					entry.stateMachine:update(dt)
+				end
+				DebugVisuals.updateTick(entry)
+			end
+		end)
+	)
+end
+
+--- Wire a behavior (state machine + debug visuals) onto an NPCEntry.
+local function wireBehavior(entry: NPCEntry): ()
+	local behaviorDef = BehaviorRegistry[entry.behaviorType]
+	if not behaviorDef then
+		log:error(`Unknown behavior type: {entry.behaviorType}`)
+		return
+	end
+
+	-- Set walk speed from behavior config (if specified)
+	local humanoid = entry.model:FindFirstChildOfClass("Humanoid")
+	if humanoid and entry.behaviorConfig.WALK_SPEED then
+		humanoid.WalkSpeed = entry.behaviorConfig.WALK_SPEED
+	end
+
+	-- Debug visuals: state label (all behaviors)
+	entry.stateLabel = DebugVisuals.createStateLabel(entry.model)
+
+	-- Debug visuals: detection radius disc (only behaviors with DETECTION_RADIUS)
+	local discColor = DISC_COLORS[entry.behaviorType]
+	if discColor and entry.behaviorConfig.DETECTION_RADIUS then
+		entry.debugDisc =
+			DebugVisuals.createDetectionRadiusCircle(entry.model, entry.behaviorConfig.DETECTION_RADIUS, discColor)
+	end
+
+	-- Create state machine
+	entry.stateMachine = NPCStateMachine.new(
+		behaviorDef.initialState,
+		behaviorDef.states,
+		entry,
+		DebugVisuals.makeStateLabelUpdater(entry.model.Name, entry.stateLabel, getDebugCallback)
+	)
+end
+
+--- Register a model+config into the active NPC registry.
+local function registerEntry(model: Model, config: { [string]: any }): string?
+	local displayName = config.displayName :: string
+
+	-- Enforce unique IDs
+	if activeNPCs[displayName] then
+		log:error(`NPC with name "{displayName}" already registered`)
 		return nil
 	end
 
@@ -187,126 +274,127 @@ local function spawnNPC(behaviorType: string, displayName: string, spawnPosition
 		model = model,
 		pathfinder = pathfinder,
 		stateMachine = nil :: any,
-		behaviorType = behaviorType,
+		behaviorType = config.behaviorType :: string,
+		behaviorConfig = config.behavior :: { [string]: any },
+		spawnPosition = config.spawnPosition :: Vector3?,
 	}
 
 	activeNPCs[displayName] = entry
-	log:info(`Spawned {displayName} ({behaviorType})`)
-	return entry
+	log:info(`Registered {displayName} ({config.behaviorType})`)
+
+	wireBehavior(entry)
+	ensureTickRunning()
+
+	return displayName
 end
 
 -- ═══════════════════════════════════════════════════════════
 -- PUBLIC API
 -- ═══════════════════════════════════════════════════════════
 
-function NPCManager.initialize(): ()
-	log:info("Initializing NPC system...")
+--- Spawn a new NPC by creating a runtime rig and registering it.
+--- config.spawnPosition is required. Returns npcId (displayName) on success, nil on failure.
+function NPCManager.spawnNPC(config: { [string]: any }): string?
+	local spawnPosition = config.spawnPosition :: Vector3?
+	if not spawnPosition then
+		log:error(`spawnNPC requires config.spawnPosition for "{config.displayName}"`)
+		return nil
+	end
 
-	-- Spawn all demo NPCs
+	local model = createNPCModel(config.displayName :: string, spawnPosition)
+	if not model then
+		log:error(`Failed to spawn {config.displayName}`)
+		return nil
+	end
+
+	return registerEntry(model, config)
+end
+
+--- Register an existing model as an NPC (no rig creation).
+--- Returns npcId (displayName) on success, nil on failure.
+function NPCManager.registerNPC(model: Model, config: { [string]: any }): string?
+	-- Validate model
+	local humanoid = model:FindFirstChildOfClass("Humanoid")
+	if not humanoid then
+		log:error(`registerNPC: model "{model.Name}" has no Humanoid`)
+		return nil
+	end
+	if not model.PrimaryPart then
+		log:error(`registerNPC: model "{model.Name}" has no PrimaryPart`)
+		return nil
+	end
+
+	-- Use model name as display name if not provided
+	if not config.displayName then
+		config.displayName = model.Name
+	end
+
+	-- Name the model to match displayName for debug panel consistency
+	model.Name = config.displayName :: string
+
+	return registerEntry(model, config)
+end
+
+--- Despawn a single NPC by its ID (displayName). Returns true if found and removed.
+function NPCManager.despawnNPC(npcId: string): boolean
+	local entry = activeNPCs[npcId]
+	if not entry then
+		log:warn(`despawnNPC: NPC "{npcId}" not found`)
+		return false
+	end
+
+	-- Destroy state machine first (onExit stops threads and pathfinder movement)
+	if entry.stateMachine then
+		entry.stateMachine:destroy()
+	end
+	-- Then destroy the pathfinder (disconnects Path.Blocked, Humanoid.Died, etc.)
+	entry.pathfinder:destroy()
+	DebugVisuals.cleanupEntry(entry)
+	if entry.model then
+		entry.model:Destroy()
+	end
+
+	activeNPCs[npcId] = nil
+	log:debug(`Despawned {npcId}`)
+	return true
+end
+
+--- Spawn the original 4 demo NPCs using GameConfig values.
+--- Convenience method that preserves backward compatibility with the demo.
+function NPCManager.initializeDemo(): ()
+	log:info("Initializing NPC demo...")
+
 	local positions = GameConfig.NPC.SPAWN_POSITIONS
 
-	local patrolEntry = spawnNPC("patrol", GameConfig.NPC.PATROL.DISPLAY_NAME, positions.PATROL)
-	local wanderEntry = spawnNPC("wander", GameConfig.NPC.WANDER.DISPLAY_NAME, positions.WANDER)
-	local chaseEntry = spawnNPC("chase", GameConfig.NPC.CHASE.DISPLAY_NAME, positions.CHASE)
+	NPCManager.spawnNPC({
+		displayName = GameConfig.NPC.PATROL.DISPLAY_NAME,
+		behaviorType = "patrol",
+		spawnPosition = positions.PATROL,
+		behavior = GameConfig.NPC.PATROL,
+	})
 
-	-- Helper: creates a getter for the debug state callback (late-binding because
-	-- DebugService.initialize sets it after NPCs spawn)
-	local function getDebugCallback()
-		return debugStateCallback
-	end
+	NPCManager.spawnNPC({
+		displayName = GameConfig.NPC.WANDER.DISPLAY_NAME,
+		behaviorType = "wander",
+		spawnPosition = positions.WANDER,
+		behavior = GameConfig.NPC.WANDER,
+	})
 
-	-- Attach state machines — each starts in its initial state (onEnter fires immediately)
-	if patrolEntry then
-		patrolEntry.stateLabel = DebugVisuals.createStateLabel(patrolEntry.model)
-		patrolEntry.stateMachine = NPCStateMachine.new(
-			"Patrolling",
-			PatrolStates,
-			patrolEntry,
-			DebugVisuals.makeStateLabelUpdater(
-				GameConfig.NPC.PATROL.DISPLAY_NAME,
-				patrolEntry.stateLabel,
-				getDebugCallback
-			)
-		)
-	end
+	NPCManager.spawnNPC({
+		displayName = GameConfig.NPC.CHASE.DISPLAY_NAME,
+		behaviorType = "chase",
+		spawnPosition = positions.CHASE,
+		behavior = GameConfig.NPC.CHASE,
+	})
 
-	if wanderEntry then
-		wanderEntry.stateLabel = DebugVisuals.createStateLabel(wanderEntry.model)
-		wanderEntry.stateMachine = NPCStateMachine.new(
-			"Wandering",
-			WanderStates,
-			wanderEntry,
-			DebugVisuals.makeStateLabelUpdater(
-				GameConfig.NPC.WANDER.DISPLAY_NAME,
-				wanderEntry.stateLabel,
-				getDebugCallback
-			)
-		)
-	end
+	NPCManager.spawnNPC({
+		displayName = GameConfig.NPC.GUARD.DISPLAY_NAME,
+		behaviorType = "guard",
+		spawnPosition = positions.GUARD,
+		behavior = GameConfig.NPC.GUARD,
+	})
 
-	if chaseEntry then
-		local humanoid = chaseEntry.model:FindFirstChildOfClass("Humanoid")
-		if humanoid then
-			humanoid.WalkSpeed = GameConfig.NPC.CHASE.WALK_SPEED
-		end
-		-- Chase starts Idle — transitions to Chasing when a player enters detection radius
-		chaseEntry.stateLabel = DebugVisuals.createStateLabel(chaseEntry.model)
-		chaseEntry.debugDisc = DebugVisuals.createDetectionRadiusCircle(
-			chaseEntry.model,
-			GameConfig.NPC.CHASE.DETECTION_RADIUS,
-			Color3.fromRGB(239, 68, 68)
-		)
-		chaseEntry.stateMachine = NPCStateMachine.new(
-			"Idle",
-			ChaseStates,
-			chaseEntry,
-			DebugVisuals.makeStateLabelUpdater(
-				GameConfig.NPC.CHASE.DISPLAY_NAME,
-				chaseEntry.stateLabel,
-				getDebugCallback
-			)
-		)
-	end
-
-	local guardEntry = spawnNPC("guard", GameConfig.NPC.GUARD.DISPLAY_NAME, positions.GUARD)
-	if guardEntry then
-		local humanoid = guardEntry.model:FindFirstChildOfClass("Humanoid")
-		if humanoid then
-			humanoid.WalkSpeed = GameConfig.NPC.GUARD.WALK_SPEED
-		end
-		-- Guard starts Guarding — LOS+distance triggers Chasing, then Returning to post
-		guardEntry.stateLabel = DebugVisuals.createStateLabel(guardEntry.model)
-		guardEntry.debugDisc = DebugVisuals.createDetectionRadiusCircle(
-			guardEntry.model,
-			GameConfig.NPC.GUARD.DETECTION_RADIUS,
-			Color3.fromRGB(255, 139, 0)
-		)
-		guardEntry.stateMachine = NPCStateMachine.new(
-			"Guarding",
-			GuardStates,
-			guardEntry,
-			DebugVisuals.makeStateLabelUpdater(
-				GameConfig.NPC.GUARD.DISPLAY_NAME,
-				guardEntry.stateLabel,
-				getDebugCallback
-			)
-		)
-	end
-
-	-- Single tick loop for all state machines
-	table.insert(
-		moduleConnections,
-		RunService.PostSimulation:Connect(function(dt: number)
-			for _, entry in activeNPCs do
-				if entry.stateMachine then
-					entry.stateMachine:update(dt)
-				end
-				DebugVisuals.updateTick(entry)
-			end
-		end)
-	)
-
-	log:info("NPC system ready")
+	log:info("NPC demo ready")
 end
 
 --- Register a callback that fires on every NPC state transition.
@@ -334,22 +422,12 @@ function NPCManager.getAllNPCStatus(playerPosition: Vector3): { [string]: any }
 		local walkSpeed = if humanoid then humanoid.WalkSpeed else 0
 		local isMoving = entry.pathfinder:isMoving()
 
-		-- Detection radius (Chase and Guard only)
-		local detectionRadius: number? = nil
-		if entry.behaviorType == "chase" then
-			detectionRadius = GameConfig.NPC.CHASE.DETECTION_RADIUS
-		elseif entry.behaviorType == "guard" then
-			detectionRadius = GameConfig.NPC.GUARD.DETECTION_RADIUS
-		end
+		-- Detection radius (nil-safe read from behavior config)
+		local detectionRadius: number? = entry.behaviorConfig.DETECTION_RADIUS
 
-		-- LOS check (Chase and Guard, when actively targeting a player)
+		-- LOS check (using standardized activeTarget field)
 		local hasLOS: boolean? = nil
-		local losTarget: Model? = nil
-		if entry.behaviorType == "guard" then
-			losTarget = entry.guardTarget
-		elseif entry.behaviorType == "chase" then
-			losTarget = entry.chaseTarget
-		end
+		local losTarget = entry.activeTarget
 		if losTarget then
 			local targetRoot = losTarget:FindFirstChild("HumanoidRootPart")
 			if targetRoot and targetRoot:IsA("BasePart") then
@@ -360,12 +438,7 @@ function NPCManager.getAllNPCStatus(playerPosition: Vector3): { [string]: any }
 		-- LOS memory countdown (when NPC has lost sight but is still pursuing)
 		local losCountdown: number? = nil
 		if entry.losLostTimer then
-			local memoryConfig: number? = nil
-			if entry.behaviorType == "chase" then
-				memoryConfig = GameConfig.NPC.CHASE.LOS_MEMORY
-			elseif entry.behaviorType == "guard" then
-				memoryConfig = GameConfig.NPC.GUARD.LOS_MEMORY
-			end
+			local memoryConfig: number? = entry.behaviorConfig.LOS_MEMORY
 			if memoryConfig then
 				losCountdown = math.floor(math.max(0, memoryConfig - entry.losLostTimer) * 10) / 10
 			end
@@ -430,6 +503,7 @@ function NPCManager.cleanup(): ()
 		connection:Disconnect()
 	end
 	table.clear(moduleConnections)
+	tickRunning = false
 
 	for name, entry in activeNPCs do
 		-- Destroy state machine first (onExit stops threads and pathfinder movement)

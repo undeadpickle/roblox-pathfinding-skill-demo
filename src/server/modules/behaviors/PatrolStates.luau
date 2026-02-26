@@ -22,7 +22,7 @@ local PATROL_COLOR = Color3.fromRGB(250, 204, 21) -- Yellow
 local PatrolStates: NPCStateMachine.StateMap = {
 	Patrolling = {
 		onEnter = function(ctx: any)
-			local config = GameConfig.NPC.PATROL
+			local config = ctx.behaviorConfig
 
 			if GameConfig.GAME.DEBUG and not ctx.debugFolder then
 				ctx.debugFolder = BehaviorHelpers.createWaypointMarkers(config.WAYPOINTS, PATROL_COLOR, true)

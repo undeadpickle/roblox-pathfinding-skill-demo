@@ -218,12 +218,7 @@ end
 function DebugVisuals.updateTick(entry: any): ()
 	-- Annotate state label during LOS memory countdown
 	if entry.stateLabel and entry.losLostTimer then
-		local memoryConfig: number? = nil
-		if entry.behaviorType == "chase" then
-			memoryConfig = GameConfig.NPC.CHASE.LOS_MEMORY
-		elseif entry.behaviorType == "guard" then
-			memoryConfig = GameConfig.NPC.GUARD.LOS_MEMORY
-		end
+		local memoryConfig: number? = entry.behaviorConfig and entry.behaviorConfig.LOS_MEMORY
 		if memoryConfig then
 			local remaining = math.max(0, memoryConfig - entry.losLostTimer)
 			entry.stateLabel.Text = string.format("Chasing (%.1fs)", remaining)

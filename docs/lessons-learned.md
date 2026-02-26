@@ -138,3 +138,9 @@
 - **[Luau]** Don't mix different table shapes in a frozen array under `--!strict`. Luau infers the array type from all elements and flags mismatches. Add dummy fields to variant entries (e.g., `size = Vector3.zero` for staircases) so all elements share the same base shape.
 
 - **[Architecture]** Don't pass a module-level variable's current value when extracting a closure to another module. The extracted closure captures the value at call time (nil), not the variable. Use a getter function (`function() return variable end`) to preserve late-binding across module boundaries.
+
+## Session: 2026-02-26 — Toolkit Refactor (Registry Pattern)
+
+- **[Roblox]** Don't expect Command Bar or MCP `require()` to return the same module instance as server scripts. Roblox has three separate require caches during play mode (server scripts, Command Bar, MCP plugin). They share the DataModel (Workspace, models) but not module-local state. To test server APIs at runtime, add test code to the server script itself or use RemoteEvents.
+
+- **[Roblox]** Don't paste ServerScriptService paths into the Command Bar without checking the context dropdown. During play mode, the Command Bar defaults to Client context where SSS children are inaccessible. Switch the dropdown to "Server" first.

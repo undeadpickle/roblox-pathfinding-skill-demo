@@ -38,7 +38,7 @@ local success, err = pcall(function()
 
 		-- Initialize NPC pathfinding system
 		local NPCManager = require(script.modules.NPCManager)
-		NPCManager.initialize()
+		NPCManager.initializeDemo()
 
 		-- Initialize debug panel server-side handlers
 		local DebugService = require(script.modules.DebugService)
