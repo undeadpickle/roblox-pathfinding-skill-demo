@@ -36,9 +36,8 @@ local success, err = pcall(function()
 			task.spawn(onPlayerAdded, player)
 		end
 
-		-- Initialize NPC pathfinding system
+		-- Initialize NPC system (NPCs spawned on-demand via debug panel)
 		local NPCManager = require(script.modules.NPCManager)
-		NPCManager.initializeDemo()
 
 		-- Initialize debug panel server-side handlers
 		local DebugService = require(script.modules.DebugService)

@@ -66,7 +66,7 @@ function DebugPanelUI.createPanel(): (ScreenGui, Frame)
 	title.Size = UDim2.new(1, -40, 1, 0)
 	title.Position = UDim2.fromOffset(PADDING, 0)
 	title.BackgroundTransparency = 1
-	title.Text = "NPC Debug"
+	title.Text = "NPC Sandbox"
 	title.TextColor3 = COLORS.PRIMARY
 	title.Font = FONTS.HEADING
 	title.TextSize = 16
@@ -488,6 +488,126 @@ function DebugPanelUI.createBehaviorRow(
 	end
 
 	return row, updateActive
+end
+
+--- Create the spawn section with behavior type buttons and a Clear All button.
+function DebugPanelUI.createSpawnSection(
+	behaviors: { string },
+	layoutOrder: number,
+	onSpawn: (behaviorType: string) -> (),
+	onClearAll: () -> ()
+): Frame
+	local section = DebugPanelUI.createSection("Spawn", layoutOrder)
+
+	-- Behavior type button grid
+	local grid = Instance.new("Frame")
+	grid.Name = "SpawnGrid"
+	grid.Size = UDim2.fromScale(1, 0)
+	grid.AutomaticSize = Enum.AutomaticSize.Y
+	grid.BackgroundTransparency = 1
+	grid.LayoutOrder = 1
+
+	local gridLayout = Instance.new("UIGridLayout")
+	gridLayout.CellSize = UDim2.new(0.48, 0, 0, ROW_HEIGHT)
+	gridLayout.CellPadding = UDim2.new(0.04, 0, 0, 4)
+	gridLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	gridLayout.Parent = grid
+
+	for i, behavior in behaviors do
+		local label = behavior:sub(1, 1):upper() .. behavior:sub(2)
+		local btn = Instance.new("TextButton")
+		btn.Name = behavior .. "SpawnBtn"
+		btn.BackgroundColor3 = COLORS.SUCCESS
+		btn.BackgroundTransparency = 0.5
+		btn.BorderSizePixel = 0
+		btn.Text = label
+		btn.TextColor3 = Color3.fromRGB(220, 220, 225)
+		btn.Font = FONTS.HEADING
+		btn.TextSize = TEXT_SIZE
+		btn.AutoButtonColor = true
+		btn.LayoutOrder = i
+
+		local btnCorner = Instance.new("UICorner")
+		btnCorner.CornerRadius = UDim.new(0, 4)
+		btnCorner.Parent = btn
+
+		btn.MouseButton1Click:Connect(function()
+			onSpawn(behavior)
+		end)
+
+		btn.Parent = grid
+	end
+
+	grid.Parent = section
+
+	-- Clear All button (full width, red)
+	local clearBtn = Instance.new("TextButton")
+	clearBtn.Name = "ClearAllBtn"
+	clearBtn.Size = UDim2.new(1, 0, 0, ROW_HEIGHT)
+	clearBtn.BackgroundColor3 = COLORS.ERROR
+	clearBtn.BackgroundTransparency = 0.5
+	clearBtn.BorderSizePixel = 0
+	clearBtn.Text = "Clear All"
+	clearBtn.TextColor3 = Color3.fromRGB(220, 220, 225)
+	clearBtn.Font = FONTS.HEADING
+	clearBtn.TextSize = TEXT_SIZE
+	clearBtn.AutoButtonColor = true
+	clearBtn.LayoutOrder = 2
+
+	local clearCorner = Instance.new("UICorner")
+	clearCorner.CornerRadius = UDim.new(0, 4)
+	clearCorner.Parent = clearBtn
+
+	clearBtn.MouseButton1Click:Connect(onClearAll)
+	clearBtn.Parent = section
+
+	return section
+end
+
+--- Create a grid of despawn buttons, one per NPC.
+function DebugPanelUI.createDespawnGrid(
+	npcKeys: { { key: string, label: string } },
+	layoutOrder: number,
+	onDespawn: (key: string) -> ()
+): Frame
+	local grid = Instance.new("Frame")
+	grid.Name = "DespawnGrid"
+	grid.Size = UDim2.fromScale(1, 0)
+	grid.AutomaticSize = Enum.AutomaticSize.Y
+	grid.BackgroundTransparency = 1
+	grid.LayoutOrder = layoutOrder
+
+	local gridLayout = Instance.new("UIGridLayout")
+	gridLayout.CellSize = UDim2.new(0.48, 0, 0, ROW_HEIGHT)
+	gridLayout.CellPadding = UDim2.new(0.04, 0, 0, 4)
+	gridLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	gridLayout.Parent = grid
+
+	for i, entry in npcKeys do
+		local btn = Instance.new("TextButton")
+		btn.Name = entry.key .. "Despawn"
+		btn.BackgroundColor3 = COLORS.ERROR
+		btn.BackgroundTransparency = 0.6
+		btn.BorderSizePixel = 0
+		btn.Text = entry.label
+		btn.TextColor3 = Color3.fromRGB(220, 220, 225)
+		btn.Font = FONTS.BODY
+		btn.TextSize = TEXT_SIZE
+		btn.AutoButtonColor = true
+		btn.LayoutOrder = i
+
+		local btnCorner = Instance.new("UICorner")
+		btnCorner.CornerRadius = UDim.new(0, 4)
+		btnCorner.Parent = btn
+
+		btn.MouseButton1Click:Connect(function()
+			onDespawn(entry.key)
+		end)
+
+		btn.Parent = grid
+	end
+
+	return grid
 end
 
 return DebugPanelUI

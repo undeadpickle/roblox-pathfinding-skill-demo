@@ -61,17 +61,8 @@ GameConfig.NPC = table.freeze({
 		WaypointSpacing = 4,
 	}),
 
-	-- Spawn positions on the default baseplate
-	SPAWN_POSITIONS = table.freeze({
-		CHASE = Vector3.new(30, 5, 0),
-		PATROL = Vector3.new(-30, 5, 0),
-		WANDER = Vector3.new(0, 5, -30),
-		GUARD = Vector3.new(0, 5, 30),
-	}),
-
 	-- Chase NPC: pursues nearest player
 	CHASE = table.freeze({
-		DISPLAY_NAME = "Chase NPC",
 		WALK_SPEED = 4,
 		DETECTION_RADIUS = 20,
 		RECOMPUTE_INTERVAL = 0.5,
@@ -83,7 +74,6 @@ GameConfig.NPC = table.freeze({
 
 	-- Patrol NPC: walks a rectangular route
 	PATROL = table.freeze({
-		DISPLAY_NAME = "Patrol NPC",
 		WAIT_TIME = 2,
 		LOOP_MODE = "loop",
 		WAYPOINTS = table.freeze({
@@ -96,7 +86,6 @@ GameConfig.NPC = table.freeze({
 
 	-- Guard NPC: random patrol with LOS-triggered chase
 	GUARD = table.freeze({
-		DISPLAY_NAME = "Guard NPC",
 		WALK_SPEED = 10,
 		DETECTION_RADIUS = 18,
 		RECOMPUTE_INTERVAL = 0.5,
@@ -118,7 +107,6 @@ GameConfig.NPC = table.freeze({
 
 	-- Wander NPC: roams randomly within a radius
 	WANDER = table.freeze({
-		DISPLAY_NAME = "Wander NPC",
 		CENTER = Vector3.new(0, 5, -30),
 		RADIUS = 25,
 		PAUSE_MIN = 1,

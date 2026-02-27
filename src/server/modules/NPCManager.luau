@@ -7,7 +7,6 @@
 	  - registerNPC(model, config) — adopt a pre-placed model
 	  - despawnNPC(npcId)      — individual teardown
 	  - setBehavior(npcId, behaviorType, behaviorConfig?) — swap behavior at runtime
-	  - initializeDemo()       — spawn the original 4 demo NPCs from GameConfig
 	  - cleanup()              — tear down all NPCs
 
 	Each NPC is driven by a state machine (NPCStateMachine) that manages behavior
@@ -51,7 +50,6 @@ type NPCEntry = {
 	stateMachine: typeof(NPCStateMachine.new("" :: any, {} :: any, {} :: any)),
 	behaviorType: string,
 	behaviorConfig: { [string]: any },
-	spawnPosition: Vector3?,
 	debugFolder: Folder?,
 	debugDisc: Part?,
 	stateLabel: TextLabel?,
@@ -301,7 +299,6 @@ local function registerEntry(model: Model, config: { [string]: any }): string?
 		stateMachine = nil :: any,
 		behaviorType = config.behaviorType :: string,
 		behaviorConfig = config.behavior :: { [string]: any },
-		spawnPosition = config.spawnPosition :: Vector3?,
 	}
 
 	activeNPCs[displayName] = entry
@@ -382,44 +379,6 @@ function NPCManager.despawnNPC(npcId: string): boolean
 	activeNPCs[npcId] = nil
 	log:debug(`Despawned {npcId}`)
 	return true
-end
-
---- Spawn the original 4 demo NPCs using GameConfig values.
---- Convenience method that preserves backward compatibility with the demo.
-function NPCManager.initializeDemo(): ()
-	log:info("Initializing NPC demo...")
-
-	local positions = GameConfig.NPC.SPAWN_POSITIONS
-
-	NPCManager.spawnNPC({
-		displayName = GameConfig.NPC.PATROL.DISPLAY_NAME,
-		behaviorType = "patrol",
-		spawnPosition = positions.PATROL,
-		behavior = GameConfig.NPC.PATROL,
-	})
-
-	NPCManager.spawnNPC({
-		displayName = GameConfig.NPC.WANDER.DISPLAY_NAME,
-		behaviorType = "wander",
-		spawnPosition = positions.WANDER,
-		behavior = GameConfig.NPC.WANDER,
-	})
-
-	NPCManager.spawnNPC({
-		displayName = GameConfig.NPC.CHASE.DISPLAY_NAME,
-		behaviorType = "chase",
-		spawnPosition = positions.CHASE,
-		behavior = GameConfig.NPC.CHASE,
-	})
-
-	NPCManager.spawnNPC({
-		displayName = GameConfig.NPC.GUARD.DISPLAY_NAME,
-		behaviorType = "guard",
-		spawnPosition = positions.GUARD,
-		behavior = GameConfig.NPC.GUARD,
-	})
-
-	log:info("NPC demo ready")
 end
 
 --- Register a callback that fires on every NPC state transition.
@@ -505,15 +464,6 @@ function NPCManager.getNPCPosition(displayName: string): Vector3?
 		return nil
 	end
 	return rootPart.Position
-end
-
---- Get an NPC's original spawn position (or nil if not found / no spawn position).
-function NPCManager.getNPCSpawnPosition(displayName: string): Vector3?
-	local entry = activeNPCs[displayName]
-	if not entry then
-		return nil
-	end
-	return entry.spawnPosition
 end
 
 --- Get the list of registered behavior type keys (sorted for stable order).
