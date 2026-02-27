@@ -28,6 +28,7 @@ local NPCPathfinder = require(script.Parent.NPCPathfinder)
 local NPCStateMachine = require(Shared.NPCStateMachine)
 
 local DebugVisuals = require(script.Parent.DebugVisuals)
+local NPCAnimator = require(script.Parent.NPCAnimator)
 
 -- Behavior state maps
 local BehaviorHelpers = require(script.Parent.behaviors.BehaviorHelpers)
@@ -65,6 +66,8 @@ type NPCEntry = {
 	wanderNpcAttachment: Attachment?,
 	-- Wander debug visual toggle (pre-mortem fix: onEnter recreates each cycle)
 	_wanderBeamVisible: boolean?,
+	-- Animation cleanup function (returned by NPCAnimator.setup)
+	_animCleanup: (() -> ())?,
 	-- Guard state fields (populated by state hooks)
 	guardPatrolThread: thread?,
 	guardReevalTimer: number?,
@@ -290,6 +293,7 @@ local function registerEntry(model: Model, config: { [string]: any }): string?
 	log:info(`Registered {displayName} ({config.behaviorType})`)
 
 	wireBehavior(entry)
+	entry._animCleanup = NPCAnimator.setup(model)
 	ensureTickRunning()
 
 	return displayName
@@ -356,6 +360,9 @@ function NPCManager.despawnNPC(npcId: string): boolean
 	end
 	-- Then destroy the pathfinder (disconnects Path.Blocked, Humanoid.Died, etc.)
 	entry.pathfinder:destroy()
+	if entry._animCleanup then
+		entry._animCleanup()
+	end
 	DebugVisuals.cleanupEntry(entry)
 	if entry.model then
 		entry.model:Destroy()
@@ -540,6 +547,9 @@ function NPCManager.cleanup(): ()
 		end
 		-- Then destroy the pathfinder (disconnects Path.Blocked, Humanoid.Died, etc.)
 		entry.pathfinder:destroy()
+		if entry._animCleanup then
+			entry._animCleanup()
+		end
 		DebugVisuals.cleanupEntry(entry)
 		if entry.model then
 			entry.model:Destroy()

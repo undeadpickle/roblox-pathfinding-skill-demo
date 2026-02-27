@@ -113,6 +113,17 @@ GameConfig.NPC = table.freeze({
 		PAUSE_MAX = 3,
 	}),
 
+	-- Animation asset IDs (default R15) and tuning
+	ANIMATIONS = table.freeze({
+		IDLE = "rbxassetid://507766666",
+		WALK = "rbxassetid://507777826",
+		RUN = "rbxassetid://507767714",
+		JUMP = "rbxassetid://507765000",
+		FALL = "rbxassetid://507767968",
+		FADE_TIME = 0.15, -- Cross-fade duration between animation states
+		RUN_SPEED_THRESHOLD = 8, -- Speed above which run anim plays instead of walk
+	}),
+
 	-- Debug state labels above NPC heads (gated by GAME.DEBUG)
 	STATE_LABEL = table.freeze({
 		SIZE = UDim2.fromOffset(220, 56),

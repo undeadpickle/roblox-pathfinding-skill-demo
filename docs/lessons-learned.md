@@ -154,3 +154,7 @@
 - **[Roblox]** Don't forget that `CreateHumanoidModelFromDescription` creates a Humanoid with `DisplayDistanceType = Subject` by default, which renders the model's Name as a built-in overhead label. When using custom BillboardGui labels, set `humanoid.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None` to suppress the native display.
 
 - **[Roblox]** Don't toggle a shared BillboardGui's `.Enabled` when it contains multiple independently-togglable TextLabels. Toggling `.Enabled` hides the entire billboard. Use individual `TextLabel.Visible` properties instead so each label can be toggled independently.
+
+## Session: 2026-02-27 — NPC Humanoid Animations
+
+- **[MCP]** Don't attempt play-mode-dependent MCP validation without first checking `RunService:IsRunning()`. Studio can be open in edit mode while looking like a playtest. One-line gate check saves multiple wasted MCP calls.

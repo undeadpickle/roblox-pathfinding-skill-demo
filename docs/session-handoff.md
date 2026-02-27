@@ -1,25 +1,23 @@
 # Session Handoff
 
 > Updated: 2026-02-27
-> Focus: Debug Panel & NPC Label Polish
+> Focus: NPC Humanoid Animations
 
 ---
 
 ## What Got Done
 
-- **Summon section split**: "Summon NPC to Me" is now its own debug panel section (order 5) with blue heading, between Teleport and Behavior. Bumped Behavior→6, Despawn→7.
-- **NPC naming format**: Changed from "Chase 1" to "Chase NPC 1" — single line change in `generateDisplayName()`, propagates everywhere.
-- **Overhead label consolidation**: Merged two separate BillboardGuis (name at +3 studs, state at +4.5 studs) into one `NPCLabelGui` billboard with a Frame/UIListLayout containing name (white, GothamMedium 12px) and state (color-coded, GothamBold 16px). Toggles use `TextLabel.Visible` since both share one billboard.
-- **Suppressed native Humanoid display name**: Set `DisplayDistanceType = None` on R15 rigs — `CreateHumanoidModelFromDescription` defaults to `Subject` which renders `model.Name` as a built-in overhead label.
-- **Panel opens by default**: `screenGui.Enabled = true` + `startPolling()` in `initialize()`. F8 still toggles.
-- **Docs updated**: CLAUDE.md (5 sections updated), lessons-learned.md (2 new lessons).
+- **NPCAnimator module**: Created signal-driven animation controller (`src/server/modules/NPCAnimator.luau`, 170 lines). Loads idle/walk/run/jump/fall tracks from config, driven by `Humanoid.Running` + `Humanoid.StateChanged`. Returns cleanup closure. Zero coupling to state machines or pathfinder.
+- **GameConfig animation config**: Added `NPC.ANIMATIONS` table with default R15 asset IDs, fade time (0.15s), and run speed threshold (8 studs/s).
+- **NPCManager integration**: 5 small additions — require, type field, setup call in `registerEntry`, cleanup calls in `despawnNPC` and `cleanup`.
+- **Docs updated**: CLAUDE.md (NPCAnimator in Key Modules, animation description in NPC Pathfinding System), lessons-learned.md (1 new lesson).
 
 ## What's Next
 
-1. **Playtest in Studio** — Full end-to-end verification of all changes (spawn, despawn, clear-all, behavior swap, teleport, summon, visual toggles, consolidated labels).
-2. **NPC house placement** — Place NPCs inside the suburban house (`Workspace.SuburbanHouse`). Guard NPC patrolling hallways would showcase LOS-breaking walls.
-3. **Polish** — Waypoint tag resolver utility, optional camelCase config field rename, API documentation.
-4. **Branch merge** — `feat/toolkit-refactor` has accumulated significant work. Consider merging to main.
+1. **Extended playtest** — Verify all 4 NPC types animate correctly in various scenarios (spawn, despawn, behavior swap, clear-all, obstacle navigation). Check for walk/idle flicker during `stop()` calls.
+2. **NPC house placement** — Place NPCs inside the suburban house (`Workspace.SuburbanHouse`). Guard NPC patrolling hallways would showcase LOS-breaking walls + animations together.
+3. **Branch merge** — `feat/toolkit-refactor` has 7+ unpushed commits of significant work. Consider merging to main.
+4. **Polish** — Waypoint tag resolver utility, optional camelCase config field rename, API documentation.
 
 ## Blockers
 
@@ -27,11 +25,29 @@ None.
 
 ---
 
+## Session Retrospective
+
+### What Worked
+
+- **Research-first with parallel agents**: Two Explore agents (animation docs + codebase analysis) gave comprehensive understanding before any code was written. No mid-implementation surprises.
+- **Signal-driven architecture**: `Humanoid.Running` handles all movement sources automatically — patrol pauses, wander delays, chase pursuit, guard returns — without touching any behavior modules. Cleanest possible integration.
+- **Pre-mortem review**: Caught `MoveTo(currentPosition)` flicker risk and `Humanoid.Running` reliability concern before implementation. Both turned out fine in practice.
+
+### What Broke
+
+- **MCP validation in edit mode**: Attempted to validate `Humanoid.Running` via MCP `run_code` but Studio was in edit mode, not play mode. Wasted 4 MCP calls. Fix: check `RunService:IsRunning()` first.
+
+### Wrong Assumptions
+
+- **"Playtest is running" ambiguity**: Assumed user had Studio in play mode; they had it open in edit mode. Lesson: verify programmatically, don't rely on verbal confirmation.
+
+---
+
 ## Architecture Notes
 
-- **NPCLabelGui structure**: `BillboardGui > Frame("Container") > UIListLayout + TextLabel("NameLabel") + TextLabel("StateLabel")`. Both toggle handlers in `setVisualEnabled` use `TextLabel.Visible` (not `BillboardGui.Enabled`) since hiding the billboard would hide both labels.
-- **DisplayDistanceType.None**: Must be set after `CreateHumanoidModelFromDescription` returns, on the Humanoid instance. Without this, Roblox renders `model.Name` as a native overhead label that overlaps with custom BillboardGui labels.
-- **Section order**: Spawn(1), Visual Toggles(2), NPC Status(3), Teleport(4), Summon(5), Behavior(6), Despawn(7).
+- **NPCAnimator is stateless**: No internal registry. Each `setup()` call returns a self-contained cleanup closure stored on the NPCEntry as `_animCleanup`. This means behavior swaps (`setBehavior`) don't need to touch animations — the Humanoid signals keep firing regardless of which state machine is running.
+- **Walk vs run threshold**: `RUN_SPEED_THRESHOLD = 8` in GameConfig. `Humanoid.Running` reports actual movement speed. Chase NPCs (WalkSpeed 4) always walk-animate, guard NPCs (WalkSpeed 10) run-animate. Patrol/wander use default WalkSpeed (16) so they run-animate.
+- **Animation priorities**: Idle < Movement < Action. Jump/fall at Action priority naturally override walk/idle without manual stop calls.
 
 ## CLAUDE.md Suggestions
 
