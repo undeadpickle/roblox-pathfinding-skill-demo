@@ -1,23 +1,23 @@
 # Session Handoff
 
-> Updated: 2026-02-26
-> Focus: NPC Sandbox — on-demand spawning via debug panel
+> Updated: 2026-02-27
+> Focus: Debug Panel & NPC Label Polish
 
 ---
 
 ## What Got Done
 
-- **Sandbox conversion**: Removed `initializeDemo()` — scene starts empty. NPCs spawned on-demand via debug panel buttons. Cut `SPAWN_POSITIONS`, `DISPLAY_NAME` fields, `getNPCSpawnPosition()`, `TELEPORT_TO_NPC` remote + handler + UI subsection.
-- **Spawn system**: New `SPAWN_NPC` remote + handler in DebugService. Auto-naming (`Chase 1`, `Patrol 1`...) with monotonic counters. NPCs spawn 10 studs in front of player.
-- **Position-relative configs**: `generateSpawnConfig()` creates waypoints/center relative to spawn position — patrol gets 20x20 square, wander gets spawn pos as center, guard gets 15-radius pentagon. Also used by SET_BEHAVIOR handler so waypoints reposition around NPC's current location.
-- **Despawn controls**: Per-NPC despawn buttons (red grid) + Clear All button (calls `NPCManager.cleanup()`). New `DESPAWN_NPC` and `CLEAR_ALL_NPCS` remotes.
-- **Panel redesign**: Renamed to "NPC Sandbox". New layout: Spawn (1) → Visual Toggles (2) → NPC Status (3) → Teleport (4, simplified — removed "To Spawn Zone") → Behavior (5) → Despawn (6). Spawn section deferred-built on first poll when `availableBehaviors` arrives from server.
-- **CLAUDE.md updated**: Overview, key modules, NPC system, debug panel sections all reflect sandbox paradigm.
+- **Summon section split**: "Summon NPC to Me" is now its own debug panel section (order 5) with blue heading, between Teleport and Behavior. Bumped Behavior→6, Despawn→7.
+- **NPC naming format**: Changed from "Chase 1" to "Chase NPC 1" — single line change in `generateDisplayName()`, propagates everywhere.
+- **Overhead label consolidation**: Merged two separate BillboardGuis (name at +3 studs, state at +4.5 studs) into one `NPCLabelGui` billboard with a Frame/UIListLayout containing name (white, GothamMedium 12px) and state (color-coded, GothamBold 16px). Toggles use `TextLabel.Visible` since both share one billboard.
+- **Suppressed native Humanoid display name**: Set `DisplayDistanceType = None` on R15 rigs — `CreateHumanoidModelFromDescription` defaults to `Subject` which renders `model.Name` as a built-in overhead label.
+- **Panel opens by default**: `screenGui.Enabled = true` + `startPolling()` in `initialize()`. F8 still toggles.
+- **Docs updated**: CLAUDE.md (5 sections updated), lessons-learned.md (2 new lessons).
 
 ## What's Next
 
-1. **Playtest in Studio** — Verify spawn, despawn, clear-all, behavior swap, teleport, and visual toggles all work end-to-end in play mode.
-2. **NPC house placement** — Place NPCs inside the suburban house (MCP-constructed at `Workspace.SuburbanHouse`). Guard NPC patrolling hallways would showcase LOS-breaking walls.
+1. **Playtest in Studio** — Full end-to-end verification of all changes (spawn, despawn, clear-all, behavior swap, teleport, summon, visual toggles, consolidated labels).
+2. **NPC house placement** — Place NPCs inside the suburban house (`Workspace.SuburbanHouse`). Guard NPC patrolling hallways would showcase LOS-breaking walls.
 3. **Polish** — Waypoint tag resolver utility, optional camelCase config field rename, API documentation.
 4. **Branch merge** — `feat/toolkit-refactor` has accumulated significant work. Consider merging to main.
 
@@ -29,10 +29,9 @@ None.
 
 ## Architecture Notes
 
-- **cleanup() → spawnNPC() cycle**: Verified safe. `cleanup()` disconnects PostSimulation tick and clears `activeNPCs`. Next `spawnNPC()` call runs `ensureTickRunning()` which reconnects it. `debugStateCallback` persists intentionally (set once by DebugService). `BehaviorHelpers.clearCache()` is safe — lazy re-populates on next use.
-- **Frozen config shallow copy**: `generateSpawnConfig` uses `table.clone(baseConfig)` to copy frozen GameConfig tables before overwriting position fields. Chase config returned as-is (no position-dependent fields).
-- **Spawn counters**: Module-local in DebugService, never reset within a session. Even after despawning `Chase 1`, next chase NPC is `Chase 2`. Prevents naming collisions and stale UI references.
-- **Plan file**: `.claude/plans/lexical-toasting-papert.md` — full design doc for the sandbox conversion.
+- **NPCLabelGui structure**: `BillboardGui > Frame("Container") > UIListLayout + TextLabel("NameLabel") + TextLabel("StateLabel")`. Both toggle handlers in `setVisualEnabled` use `TextLabel.Visible` (not `BillboardGui.Enabled`) since hiding the billboard would hide both labels.
+- **DisplayDistanceType.None**: Must be set after `CreateHumanoidModelFromDescription` returns, on the Humanoid instance. Without this, Roblox renders `model.Name` as a native overhead label that overlaps with custom BillboardGui labels.
+- **Section order**: Spawn(1), Visual Toggles(2), NPC Status(3), Teleport(4), Summon(5), Behavior(6), Despawn(7).
 
 ## CLAUDE.md Suggestions
 

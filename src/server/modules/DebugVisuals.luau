@@ -28,8 +28,8 @@ local DebugVisuals = {}
 -- STATE LABELS
 -- ═══════════════════════════════════════════════════════════
 
---- Creates a BillboardGui + TextLabel above the NPC's Head for state display.
---- Returns nil if DEBUG is off or model has no Head.
+--- Creates a combined BillboardGui above the NPC's Head with name + state labels.
+--- Returns the state TextLabel (or nil if DEBUG is off / no Head).
 function DebugVisuals.createStateLabel(model: Model): TextLabel?
 	if not GameConfig.GAME.DEBUG then
 		return nil
@@ -43,25 +43,52 @@ function DebugVisuals.createStateLabel(model: Model): TextLabel?
 	local config = GameConfig.NPC.STATE_LABEL
 
 	local billboard = Instance.new("BillboardGui")
-	billboard.Name = "StateLabelGui"
+	billboard.Name = "NPCLabelGui"
 	billboard.Size = config.SIZE
 	billboard.StudsOffset = config.STUDS_OFFSET
 	billboard.AlwaysOnTop = true
 
-	local label = Instance.new("TextLabel")
-	label.Name = "StateLabel"
-	label.Size = UDim2.fromScale(1, 1)
-	label.BackgroundTransparency = 1
-	label.Text = ""
-	label.TextColor3 = config.DEFAULT_COLOR
-	label.TextStrokeTransparency = config.STROKE_TRANSPARENCY
-	label.Font = config.FONT
-	label.TextSize = config.TEXT_SIZE
-	label.Parent = billboard
+	local container = Instance.new("Frame")
+	container.Name = "Container"
+	container.Size = UDim2.fromScale(1, 1)
+	container.BackgroundTransparency = 1
+	container.Parent = billboard
+
+	local layout = Instance.new("UIListLayout")
+	layout.SortOrder = Enum.SortOrder.LayoutOrder
+	layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+	layout.Padding = UDim.new(0, 2)
+	layout.Parent = container
+
+	-- Top row: NPC display name (smaller, muted)
+	local nameLabel = Instance.new("TextLabel")
+	nameLabel.Name = "NameLabel"
+	nameLabel.Size = UDim2.new(1, 0, 0, 16)
+	nameLabel.BackgroundTransparency = 1
+	nameLabel.Text = model.Name
+	nameLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+	nameLabel.TextStrokeTransparency = 0
+	nameLabel.Font = Enum.Font.GothamMedium
+	nameLabel.TextSize = 12
+	nameLabel.LayoutOrder = 1
+	nameLabel.Parent = container
+
+	-- Bottom row: state (larger, bold, color-coded)
+	local stateLabel = Instance.new("TextLabel")
+	stateLabel.Name = "StateLabel"
+	stateLabel.Size = UDim2.new(1, 0, 0, 22)
+	stateLabel.BackgroundTransparency = 1
+	stateLabel.Text = ""
+	stateLabel.TextColor3 = config.DEFAULT_COLOR
+	stateLabel.TextStrokeTransparency = config.STROKE_TRANSPARENCY
+	stateLabel.Font = config.FONT
+	stateLabel.TextSize = 16
+	stateLabel.LayoutOrder = 2
+	stateLabel.Parent = container
 
 	billboard.Parent = head
 
-	return label
+	return stateLabel
 end
 
 --- Returns a callback that updates a state label's text/color and optionally
@@ -150,9 +177,12 @@ function DebugVisuals.setVisualEnabled(entry: any, visualType: string, enabled: 
 	elseif visualType == "stateLabel" then
 		local head = entry.model:FindFirstChild("Head")
 		if head then
-			local billboard = head:FindFirstChild("StateLabelGui")
-			if billboard and billboard:IsA("BillboardGui") then
-				billboard.Enabled = enabled
+			local billboard = head:FindFirstChild("NPCLabelGui")
+			if billboard then
+				local label = billboard:FindFirstChild("Container") and billboard.Container:FindFirstChild("StateLabel")
+				if label then
+					label.Visible = enabled
+				end
 			end
 		end
 	elseif visualType == "waypoints" then
@@ -181,13 +211,13 @@ function DebugVisuals.setVisualEnabled(entry: any, visualType: string, enabled: 
 		-- Toggle chase/guard path dots (the small spheres along computed path)
 		entry.pathfinder:setVisualizeEnabled(enabled)
 	elseif visualType == "nameLabel" then
-		-- Toggle the NPC display name BillboardGui above head
 		local head = entry.model:FindFirstChild("Head")
 		if head then
-			-- Name label is a BillboardGui that is NOT named "StateLabelGui"
-			for _, child in head:GetChildren() do
-				if child:IsA("BillboardGui") and child.Name ~= "StateLabelGui" then
-					child.Enabled = enabled
+			local billboard = head:FindFirstChild("NPCLabelGui")
+			if billboard then
+				local label = billboard:FindFirstChild("Container") and billboard.Container:FindFirstChild("NameLabel")
+				if label then
+					label.Visible = enabled
 				end
 			end
 		end

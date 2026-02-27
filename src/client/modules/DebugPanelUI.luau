@@ -34,7 +34,7 @@ function DebugPanelUI.createPanel(): (ScreenGui, Frame)
 	screenGui.DisplayOrder = 100
 	screenGui.ResetOnSpawn = false
 	screenGui.IgnoreGuiInset = false
-	screenGui.Enabled = false -- starts hidden
+	screenGui.Enabled = true -- starts visible
 
 	local panel = Instance.new("Frame")
 	panel.Name = "PanelFrame"

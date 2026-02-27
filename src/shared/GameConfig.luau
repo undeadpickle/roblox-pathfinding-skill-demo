@@ -115,8 +115,8 @@ GameConfig.NPC = table.freeze({
 
 	-- Debug state labels above NPC heads (gated by GAME.DEBUG)
 	STATE_LABEL = table.freeze({
-		SIZE = UDim2.fromOffset(200, 30),
-		STUDS_OFFSET = Vector3.new(0, 4.5, 0),
+		SIZE = UDim2.fromOffset(220, 56),
+		STUDS_OFFSET = Vector3.new(0, 3.5, 0),
 		TEXT_SIZE = 14,
 		FONT = Enum.Font.GothamBold,
 		STROKE_TRANSPARENCY = 0,

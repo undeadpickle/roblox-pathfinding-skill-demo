@@ -148,3 +148,9 @@
 ## Session: 2026-02-26 — Dynamic Debug Panel (Phase 2)
 
 - **[Architecture]** Don't assume behavior configs are interchangeable when calling `setBehavior` without explicit config. Each behavior type has required fields that others lack (e.g., guard needs `DETECT_INTERVAL`, `PATROL_PAUSE`, `WAYPOINTS`). Omitting config reuses the existing one, which causes nil field crashes — not graceful degradation. Always supply the target behavior's default config from GameConfig when the caller doesn't know the NPC's current config shape.
+
+## Session: 2026-02-27 — Debug Panel & NPC Label Polish
+
+- **[Roblox]** Don't forget that `CreateHumanoidModelFromDescription` creates a Humanoid with `DisplayDistanceType = Subject` by default, which renders the model's Name as a built-in overhead label. When using custom BillboardGui labels, set `humanoid.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None` to suppress the native display.
+
+- **[Roblox]** Don't toggle a shared BillboardGui's `.Enabled` when it contains multiple independently-togglable TextLabels. Toggling `.Enabled` hides the entire billboard. Use individual `TextLabel.Visible` properties instead so each label can be toggled independently.

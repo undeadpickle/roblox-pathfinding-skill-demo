@@ -47,6 +47,7 @@ local isPolling = false
 local spawnSection: Frame? = nil
 local statusSection: Frame? = nil
 local teleportSection: Frame? = nil
+local summonSection: Frame? = nil
 local behaviorSection: Frame? = nil
 local despawnSection: Frame? = nil
 local behaviorUpdaters: { [string]: (newBehavior: string) -> () } = {}
@@ -112,7 +113,7 @@ local function buildStatusSection(npcList: { { displayName: string, behaviorType
 	return section
 end
 
---- Build the teleport section from the current NPC list.
+--- Build the teleport (go-to) section from the current NPC list.
 local function buildTeleportSection(npcList: { { displayName: string, behaviorType: string } }): Frame
 	local section = DebugPanelUI.createSection("Teleport", 4)
 
@@ -122,29 +123,38 @@ local function buildTeleportSection(npcList: { { displayName: string, behaviorTy
 		return section
 	end
 
-	-- Build NPC key arrays (shared format for all grids)
 	local npcKeys: { { key: string, label: string } } = {}
 	for _, npc in npcList do
 		table.insert(npcKeys, { key = npc.displayName, label = npc.displayName })
 	end
 
-	-- Subsection: To NPC (Current Pos)
-	local goToLabel = DebugPanelUI.createSubLabel("To NPC (Current Pos)", 1)
-	goToLabel.Parent = section
-
 	local goToEvent = Remotes.getEvent(DebugRemotes.TELEPORT_TO_NPC_CURRENT)
-	local goToGrid = DebugPanelUI.createTeleportGrid(npcKeys, 2, function(displayName: string)
+	local goToGrid = DebugPanelUI.createTeleportGrid(npcKeys, 1, function(displayName: string)
 		goToEvent:FireServer(displayName)
 		log:debug(`Teleporting to {displayName} current pos`)
 	end)
 	goToGrid.Parent = section
 
-	-- Subsection: Summon NPC to Me
-	local summonLabel = DebugPanelUI.createSubLabel("Summon NPC to Me", 3)
-	summonLabel.Parent = section
+	return section
+end
+
+--- Build the summon section from the current NPC list.
+local function buildSummonSection(npcList: { { displayName: string, behaviorType: string } }): Frame
+	local section = DebugPanelUI.createSection("Summon", 5)
+
+	if #npcList == 0 then
+		local emptyLabel = DebugPanelUI.createSubLabel("No NPCs to summon", 1)
+		emptyLabel.Parent = section
+		return section
+	end
+
+	local npcKeys: { { key: string, label: string } } = {}
+	for _, npc in npcList do
+		table.insert(npcKeys, { key = npc.displayName, label = npc.displayName })
+	end
 
 	local summonEvent = Remotes.getEvent(DebugRemotes.TELEPORT_NPC_TO_PLAYER)
-	local summonGrid = DebugPanelUI.createTeleportGrid(npcKeys, 4, function(displayName: string)
+	local summonGrid = DebugPanelUI.createTeleportGrid(npcKeys, 1, function(displayName: string)
 		summonEvent:FireServer(displayName)
 		log:debug(`Summoning {displayName} to player`)
 	end)
@@ -158,7 +168,7 @@ local function buildBehaviorSection(
 	npcList: { { displayName: string, behaviorType: string } },
 	behaviors: { string }
 ): Frame
-	local section = DebugPanelUI.createSection("Behavior", 5)
+	local section = DebugPanelUI.createSection("Behavior", 6)
 	table.clear(behaviorUpdaters)
 
 	if #npcList == 0 or #behaviors == 0 then
@@ -189,7 +199,7 @@ end
 
 --- Build the despawn section from the current NPC list.
 local function buildDespawnSection(npcList: { { displayName: string, behaviorType: string } }): Frame
-	local section = DebugPanelUI.createSection("Despawn", 6)
+	local section = DebugPanelUI.createSection("Despawn", 7)
 
 	if #npcList == 0 then
 		local emptyLabel = DebugPanelUI.createSubLabel("No NPCs to despawn", 1)
@@ -275,6 +285,9 @@ local function rebuildDynamicSections(newList: { { displayName: string, behavior
 	if teleportSection then
 		teleportSection:Destroy()
 	end
+	if summonSection then
+		summonSection:Destroy()
+	end
 	if behaviorSection then
 		behaviorSection:Destroy()
 	end
@@ -288,6 +301,9 @@ local function rebuildDynamicSections(newList: { { displayName: string, behavior
 
 	teleportSection = buildTeleportSection(newList)
 	teleportSection.Parent = content
+
+	summonSection = buildSummonSection(newList)
+	summonSection.Parent = content
 
 	behaviorSection = buildBehaviorSection(newList, availableBehaviors)
 	behaviorSection.Parent = content
@@ -473,7 +489,7 @@ function DebugPanel.initialize(): ()
 
 	visualSection.Parent = contentFrame
 
-	-- Sections 3-6 (Status + Teleport + Behavior + Despawn) built dynamically on first poll
+	-- Sections 3-7 (Status + Teleport + Summon + Behavior + Despawn) built dynamically on first poll
 
 	-- Listen for state change pushes (instant updates between polls)
 	local stateChangedEvent = Remotes.getEvent(DebugRemotes.NPC_STATE_CHANGED)
@@ -537,6 +553,9 @@ function DebugPanel.initialize(): ()
 	end)
 
 	perfGui.Parent = playerGui
+
+	-- Start polling immediately (panel opens by default)
+	startPolling()
 
 	log:info(`Debug panel ready (toggle: {TOGGLE_KEY.Name})`)
 end

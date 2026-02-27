@@ -160,25 +160,10 @@ local function createNPCModel(displayName: string, spawnPosition: Vector3): Mode
 
 	model.Name = displayName
 
-	-- Add name label above head
-	local head = model:FindFirstChild("Head")
-	if head and head:IsA("BasePart") then
-		local billboard = Instance.new("BillboardGui")
-		billboard.Size = UDim2.fromOffset(200, 50)
-		billboard.StudsOffset = Vector3.new(0, 3, 0)
-		billboard.AlwaysOnTop = true
-
-		local label = Instance.new("TextLabel")
-		label.Size = UDim2.fromScale(1, 1)
-		label.BackgroundTransparency = 1
-		label.Text = displayName
-		label.TextColor3 = Color3.new(1, 1, 1)
-		label.TextStrokeTransparency = 0.5
-		label.Font = Enum.Font.GothamBold
-		label.TextScaled = true
-		label.Parent = billboard
-
-		billboard.Parent = head
+	-- Suppress built-in Humanoid display name (we use our own BillboardGui label)
+	local humanoid = model:FindFirstChildOfClass("Humanoid")
+	if humanoid then
+		humanoid.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
 	end
 
 	-- Position and parent (properties before Parent per conventions)

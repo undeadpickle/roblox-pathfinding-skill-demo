@@ -43,7 +43,7 @@ local function generateDisplayName(behaviorType: string): string
 	spawnCounters[behaviorType] = (spawnCounters[behaviorType] or 0) + 1
 	local count = spawnCounters[behaviorType]
 	local label = behaviorType:sub(1, 1):upper() .. behaviorType:sub(2)
-	return `{label} {count}`
+	return `{label} NPC {count}`
 end
 
 --- Shallow-copy a frozen GameConfig table and override position-dependent fields
