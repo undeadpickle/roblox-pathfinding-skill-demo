@@ -244,9 +244,11 @@ end
 function DebugVisuals.cleanupEntry(entry: any): ()
 	if entry.debugFolder then
 		entry.debugFolder:Destroy()
+		entry.debugFolder = nil
 	end
 	if entry.debugDisc then
 		entry.debugDisc:Destroy()
+		entry.debugDisc = nil
 	end
 end
 

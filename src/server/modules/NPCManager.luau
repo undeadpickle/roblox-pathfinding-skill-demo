@@ -6,6 +6,7 @@
 	  - spawnNPC(config)       — create a runtime rig and register it
 	  - registerNPC(model, config) — adopt a pre-placed model
 	  - despawnNPC(npcId)      — individual teardown
+	  - setBehavior(npcId, behaviorType, behaviorConfig?) — swap behavior at runtime
 	  - initializeDemo()       — spawn the original 4 demo NPCs from GameConfig
 	  - cleanup()              — tear down all NPCs
 
@@ -218,6 +219,28 @@ local function ensureTickRunning(): ()
 	)
 end
 
+--- Nil all behavior-specific fields on an NPCEntry.
+--- Called after stateMachine:destroy() (which runs onExit cleanup) as a safety net
+--- to catch any fields that onExit didn't nil (e.g., timers only cleared in one exit path).
+local function scrubBehaviorFields(entry: NPCEntry): ()
+	-- Chase/Guard shared
+	entry.activeTarget = nil
+	entry.losLostTimer = nil
+	entry.reevalTimer = nil
+	-- Wander-specific (Instances should be destroyed by onExit already)
+	entry.wanderThread = nil
+	entry.wanderTargetMarker = nil
+	entry.wanderNpcAttachment = nil
+	entry._wanderBeamVisible = nil
+	-- Guard-specific
+	entry.guardPatrolThread = nil
+	entry.guardReevalTimer = nil
+	entry.guardDetectTimer = nil
+	entry.guardLastWaypointIndex = nil
+	entry.guardReachedWaypoint = nil
+	entry.guardReturnDwell = nil
+end
+
 --- Wire a behavior (state machine + debug visuals) onto an NPCEntry.
 local function wireBehavior(entry: NPCEntry): ()
 	local behaviorDef = BehaviorRegistry[entry.behaviorType]
@@ -232,8 +255,10 @@ local function wireBehavior(entry: NPCEntry): ()
 		humanoid.WalkSpeed = entry.behaviorConfig.WALK_SPEED
 	end
 
-	-- Debug visuals: state label (all behaviors)
-	entry.stateLabel = DebugVisuals.createStateLabel(entry.model)
+	-- Debug visuals: state label (all behaviors, persists across behavior swaps)
+	if not entry.stateLabel then
+		entry.stateLabel = DebugVisuals.createStateLabel(entry.model)
+	end
 
 	-- Debug visuals: detection radius disc (only behaviors with DETECTION_RADIUS)
 	local discColor = DISC_COLORS[entry.behaviorType]
@@ -494,6 +519,55 @@ function NPCManager.teleportNPC(displayName: string, position: Vector3): boolean
 	log:debug(
 		`Teleported NPC "{displayName}" to ({math.floor(position.X)}, {math.floor(position.Y)}, {math.floor(position.Z)})`
 	)
+	return true
+end
+
+--- Swap a running NPC's behavior at runtime.
+--- Tears down the old state machine and debug visuals, scrubs behavior-specific
+--- context fields, then wires the new behavior. Model and pathfinder persist.
+--- If behaviorConfig is nil, the existing config is reused — caller must ensure
+--- the config is compatible with the new behavior type (e.g., patrol needs WAYPOINTS).
+--- Returns true on success, false if NPC not found or behavior type unknown.
+function NPCManager.setBehavior(npcId: string, behaviorType: string, behaviorConfig: { [string]: any }?): boolean
+	local entry = activeNPCs[npcId]
+	if not entry then
+		log:warn(`setBehavior: NPC "{npcId}" not found`)
+		return false
+	end
+
+	if not BehaviorRegistry[behaviorType] then
+		log:error(`setBehavior: unknown behavior type "{behaviorType}"`)
+		return false
+	end
+
+	local newConfig = behaviorConfig or entry.behaviorConfig
+	if not newConfig then
+		log:error(`setBehavior: no config provided and NPC "{npcId}" has no existing config`)
+		return false
+	end
+
+	local oldBehavior = entry.behaviorType
+	log:info(`Swapping {npcId}: {oldBehavior} -> {behaviorType}`)
+
+	-- 1. Destroy old state machine (triggers current state's onExit → stops threads, pathfinder)
+	if entry.stateMachine then
+		entry.stateMachine:destroy()
+	end
+
+	-- 2. Scrub behavior-specific fields (safety net after onExit)
+	scrubBehaviorFields(entry)
+
+	-- 3. Clean up behavior-specific debug visuals (disc + waypoint markers)
+	DebugVisuals.cleanupEntry(entry)
+
+	-- 4. Update entry with new behavior identity
+	entry.behaviorType = behaviorType
+	entry.behaviorConfig = newConfig
+
+	-- 5. Wire new behavior (state machine, disc, walkspeed — state label persists)
+	wireBehavior(entry)
+
+	log:info(`{npcId} now running "{behaviorType}"`)
 	return true
 end
 
