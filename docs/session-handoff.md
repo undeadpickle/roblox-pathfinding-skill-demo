@@ -1,24 +1,23 @@
 # Session Handoff
 
 > Updated: 2026-02-26
-> Focus: Toolkit refactor Phase 2 — runtime behavior swap
+> Focus: Phase 2 — Dynamic debug panel, spawn position fix, setBehavior UI
 
 ---
 
 ## What Got Done
 
-- **`setBehavior(npcId, behaviorType, behaviorConfig?)`**: Full runtime behavior swap on NPCManager. Tears down old state machine (triggers onExit), scrubs all 12 behavior-specific ctx fields via `scrubBehaviorFields`, cleans debug visuals (disc + waypoint folder), updates entry identity, re-wires via `wireBehavior`. Model and pathfinder persist across swaps.
-- **`wireBehavior` idempotency**: State label creation guarded with `if not entry.stateLabel then` so it persists across swaps. Detection disc is always freshly created (old one destroyed by `cleanupEntry`).
-- **`DebugVisuals.cleanupEntry` nil fix**: Now nils `debugFolder` and `debugDisc` fields after `:Destroy()`. Prevents `updateTick` from accessing destroyed Instances when entries stay in `activeNPCs` (as they do during `setBehavior`, unlike `despawnNPC`).
-- **Verified working**: Three swap scenarios tested in Studio playtest (chase→patrol, patrol→chase, guard→wander). Zero errors. Disc creation/destruction, state label persistence, and behavior re-wiring all confirmed.
+- **Dynamic debug panel**: Replaced hardcoded `NPC_ORDER` (4 demo NPCs) with server-driven dynamic list. Panel rebuilds status/teleport/behavior sections automatically when NPCs are spawned or despawned. Diff logic in poll loop detects add/remove by comparing display names.
+- **Spawn position fix**: `TELEPORT_TO_NPC` handler now reads `NPCEntry.spawnPosition` via `NPCManager.getNPCSpawnPosition()` instead of `GameConfig.NPC.SPAWN_POSITIONS[key]`. Works for dynamic NPCs. Removed GameConfig dependency from DebugService (re-added for behavior defaults).
+- **setBehavior UI**: New "Behavior" section in debug panel with per-NPC button rows (Chase, Patrol, Wander, Guard). Active behavior highlighted. Buttons fire `SET_BEHAVIOR` remote. Server supplies default GameConfig per behavior type to prevent nil field crashes from incompatible configs.
+- **Visual toggle persistence**: Added `visualToggleStates` map tracking toggle state. `syncToggleStatesToNPCs()` fires after every rebuild so newly spawned NPCs get correct visual state.
+- **Config compatibility fix**: DebugService SET_BEHAVIOR handler always passes `defaultBehaviorConfigs[behaviorType]` (from GameConfig) to `NPCManager.setBehavior()`, preventing crashes when swapping between behaviors with different required fields.
 
 ## What's Next
 
-1. **Phase 2: Dynamic debug panel** — Server-driven NPC list instead of hardcoded `NPC_ORDER` in DebugPanel. Dynamically spawned NPCs should appear in the panel. Files: `src/client/DebugPanel.luau`, `src/server/modules/DebugService.luau`
-2. **Phase 2: DebugService spawn position fix** — `TELEPORT_TO_NPC` reads `GameConfig.NPC.SPAWN_POSITIONS` which won't work for dynamic NPCs. Should read from `NPCEntry.spawnPosition` instead. File: `src/server/modules/DebugService.luau`
-3. **Phase 2: Debug panel setBehavior UI** — Add a remote + UI control so the debug panel can trigger behavior swaps. `DebugRemotes.SET_BEHAVIOR` → `NPCManager.setBehavior()`.
-4. **Phase 3: Polish** — Waypoint tag resolver utility, optional camelCase config field rename, API documentation
-5. **CLAUDE.md update** — NPCManager description (lines 63, 76) needs `setBehavior` added to the public API list. Suggested but not auto-edited per global rules.
+1. **Phase 3: Polish** — Waypoint tag resolver utility, optional camelCase config field rename, API documentation. Files: various across `src/server/modules/` and `src/shared/`
+2. **NPC house placement** — Place NPCs inside the suburban house (MCP-constructed at `Workspace.SuburbanHouse`). Guard NPC patrolling hallways would showcase LOS-breaking walls.
+3. **Branch merge** — `feat/toolkit-refactor` has accumulated significant work. Consider merging to main when ready.
 
 ## Blockers
 
@@ -30,27 +29,27 @@ None.
 
 ### What Worked
 
-- **Pre-mortem before implementation**: Caught the `cleanupEntry` nil issue — `updateTick` would have accessed destroyed disc Instances since entries stay in `activeNPCs` during swaps. Also validated that all state `onExit` handlers properly clean up threads before the safety-net scrub.
-- **Plan-first with thorough exploration**: Three parallel explore agents mapped every ctx field written by every state across all 4 behaviors. The scrub list was complete on first try — no missed fields.
-- **Reusing `wireBehavior`**: One guard clause was the only modification needed. No code duplication.
+- **Pre-mortem before implementation**: Caught the Task 2→Task 1 sequencing issue (server expects displayName but client still sends config key) before it could break teleport-to-spawn between tasks. Also identified the visual toggle state persistence gap.
+- **Plan-first with parallel explore agents**: Two agents mapped the full debug panel architecture (client data flow, remote contracts, hardcoded assumptions) in parallel before writing any code. Zero ambiguity during implementation.
+- **Reusing existing patterns**: `getNPCSpawnPosition` followed `getNPCPosition`'s exact pattern. `createBehaviorRow` reused `createTeleportGrid`'s grid layout. Diff/rebuild kept the poll loop simple.
 
 ### What Broke
 
-Nothing. Clean implementation.
+- **Config compatibility crash on behavior swap**: Swapping Chase NPC to Guard hit `attempt to compare number < nil` on `GuardStates:57` (`ctx.behaviorConfig.DETECT_INTERVAL`). Root cause: `setBehavior` reuses existing config when none provided, but guard needs fields (DETECT_INTERVAL, PATROL_PAUSE, WAYPOINTS) that chase config lacks. Fixed by having DebugService always supply default GameConfig for the target behavior type.
 
 ### Wrong Assumptions
 
-None this session.
+- **"NPC just stands still" on incompatible config**: The plan assumed missing config fields would cause graceful degradation. In reality, guard's `onUpdate` does `ctx.guardDetectTimer < ctx.behaviorConfig.DETECT_INTERVAL` on every frame — nil comparison is a hard crash, not silent failure.
 
 ---
 
 ## Architecture Notes
 
-- **Plan file**: `.claude/plans/lexical-humming-sparrow.md` — setBehavior design decisions, pre-mortem results, verification checklist.
-- **Previous plan**: `.claude/plans/enchanted-noodling-stallman.md` — Full Phase 1/2/3 plan. Still relevant for remaining Phase 2/3 work.
-- **setBehavior flow**: destroy SM → `scrubBehaviorFields()` → `DebugVisuals.cleanupEntry()` → update entry fields → `wireBehavior()`. All synchronous, no yields.
-- **Key invariant**: `wireBehavior` is now safe for both initial setup and re-wiring. State label is idempotent. Disc and state machine are always created fresh.
+- **Plan file**: `.claude/plans/reflective-mapping-whisper.md` — Phase 2 design decisions, pre-mortem results, all three task specs.
+- **Poll-driven rebuild**: `diffNPCList()` extracts sorted NPC list from status response, compares by display name only (behavior changes don't trigger rebuild — handled by per-poll highlight sync instead).
+- **`_meta` convention**: Status response includes `result._meta = { availableBehaviors = {...} }`. Client skips `_meta` key in NPC iteration. Won't collide with NPC display names.
+- **Default config pattern**: DebugService maintains `defaultBehaviorConfigs` map (behavior type → GameConfig section). `NPCManager.setBehavior` stays config-agnostic; the "smart defaults" live in the convenience layer.
 
 ## CLAUDE.md Suggestions
 
-- Add `setBehavior` to NPCManager public API list (line 63) and NPC Pathfinding System section (line 76)
+None — updated this session to reflect all changes.

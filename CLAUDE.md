@@ -60,20 +60,20 @@ NPC pathfinding demo showcasing chase, patrol, wander, and guard behaviors using
 - `Logger` — Debug logging with [Server]/[Client] prefixes
 - `NPCPathfinder` — PathfindingService wrapper with moveTo, patrol, followTarget, wander, hasLineOfSight, setVisualizeEnabled
 - `NPCStateMachine` — Generic finite state machine (shared, reusable for any system). Optional `onStateChanged` callback (4th param) fires on initial state and every transition.
-- `NPCManager` — Registry-based NPC orchestrator. Public API: `spawnNPC(config)` (creates rig + registers), `registerNPC(model, config)` (adopts pre-placed model), `despawnNPC(npcId)` (individual teardown), `initializeDemo()` (spawns original 4 demo NPCs from GameConfig). Also exposes `getAllNPCStatus()`, `setDebugVisualEnabled()`, `setDebugStateCallback()`, `getNPCPosition()`, `teleportNPC()` for debug panel. Internal BehaviorRegistry maps behavior type strings to state modules. State definitions live in `behaviors/` modules.
+- `NPCManager` — Registry-based NPC orchestrator. Public API: `spawnNPC(config)` (creates rig + registers), `registerNPC(model, config)` (adopts pre-placed model), `despawnNPC(npcId)` (individual teardown), `setBehavior(npcId, behaviorType, behaviorConfig?)` (runtime behavior swap — tears down SM, scrubs ctx, cleans visuals, re-wires), `initializeDemo()` (spawns original 4 demo NPCs from GameConfig). Also exposes `getAllNPCStatus()`, `getAvailableBehaviors()`, `getNPCSpawnPosition()`, `setDebugVisualEnabled()`, `setDebugStateCallback()`, `getNPCPosition()`, `teleportNPC()` for debug panel. Internal BehaviorRegistry maps behavior type strings to state modules. State definitions live in `behaviors/` modules.
 - `DebugVisuals` — Debug visualization: state labels, detection discs, visual toggling (`setVisualEnabled`), per-frame debug updates (`updateTick`), cleanup. Extracted from NPCManager to separate presentation from NPC lifecycle.
 - `behaviors/ChaseStates` — Chase NPC state definitions (Idle ↔ Chasing). Reads from `ctx.behaviorConfig`, uses `ctx.activeTarget` for chase target.
 - `behaviors/PatrolStates` — Patrol NPC state definitions (Patrolling). Reads from `ctx.behaviorConfig`.
 - `behaviors/WanderStates` — Wander NPC state definitions (Wandering). Reads from `ctx.behaviorConfig`.
 - `behaviors/GuardStates` — Guard NPC state definitions (Guarding ↔ Chasing ↔ Returning). Reads from `ctx.behaviorConfig`, uses `ctx.activeTarget` for chase target.
 - `behaviors/BehaviorHelpers` — Shared utilities: findNearestPlayer, detectNearestPlayerInRange, getRandomPointInRadius, createWaypointMarkers, evaluateChaseTarget
-- `DebugRemotes` — String constants for debug remote names (shared, single source of truth)
-- `DebugService` — Server-side handler bridging debug panel requests into NPCManager
-- `DebugPanel` — Client-side debug panel logic (toggle, polling, remote calls)
-- `DebugPanelUI` — UI factory functions for debug panel elements (raw Roblox instances, no framework)
+- `DebugRemotes` — String constants for debug remote names (shared, single source of truth). Includes GET_NPC_STATUS, TOGGLE_VISUAL, TELEPORT_TO_NPC, TELEPORT_TO_NPC_CURRENT, TELEPORT_NPC_TO_PLAYER, SET_BEHAVIOR, NPC_STATE_CHANGED.
+- `DebugService` — Server-side handler bridging debug panel requests into NPCManager. Augments status response with `_meta.availableBehaviors`. SET_BEHAVIOR handler supplies default configs from GameConfig per behavior type to prevent nil field crashes from incompatible configs.
+- `DebugPanel` — Client-side debug panel logic. Server-driven dynamic NPC list (no hardcoded NPC_ORDER). Polls status every 0.5s, diffs NPC list, rebuilds status/teleport/behavior sections on add/remove. Behavior section shows per-NPC swap buttons with active highlight. Visual toggle states persist across rebuilds and sync to newly spawned NPCs.
+- `DebugPanelUI` — UI factory functions for debug panel elements (raw Roblox instances, no framework). Includes `createBehaviorRow` for per-NPC behavior swap buttons with update callback.
 
 ### NPC Pathfinding System
-- Registry-based NPC system: `spawnNPC(config)` creates R15 rigs, `registerNPC(model, config)` adopts pre-placed models, `despawnNPC(npcId)` tears down individual NPCs. `initializeDemo()` spawns the original 4 demo NPCs.
+- Registry-based NPC system: `spawnNPC(config)` creates R15 rigs, `registerNPC(model, config)` adopts pre-placed models, `despawnNPC(npcId)` tears down individual NPCs, `setBehavior(npcId, behaviorType, behaviorConfig?)` swaps behavior at runtime (model + pathfinder persist). `initializeDemo()` spawns the original 4 demo NPCs.
 - Config-driven behaviors: behavior type + config table passed at spawn/register time. Behavior modules read from `ctx.behaviorConfig` (not GameConfig). Chase/guard use `ctx.activeTarget` (standardized from old `chaseTarget`/`guardTarget`).
 - BehaviorRegistry maps string keys ("chase", "patrol", "wander", "guard") to state modules + initial states.
 - 4 demo NPCs: Chase (follows nearest player), Patrol (loops waypoints), Wander (random points in radius), Guard (random patrol + LOS-triggered chase + return-to-post)
@@ -87,7 +87,7 @@ NPC pathfinding demo showcasing chase, patrol, wander, and guard behaviors using
 - Guard detection: distance + LOS raycast (via `hasLineOfSight`) to initiate chase, LOS memory timer during chase (counts down when sight lost, drops target when expired). Returns to nearest waypoint when target lost.
 - `hasLineOfSight(targetPos, excludeModels?)` is public on NPCPathfinder. Raycasts from NPC root to target, excluding the NPC model and optionally additional models (e.g., the target player's character).
 - Debug visuals gated by `GameConfig.GAME.DEBUG`: state labels above heads, detection radius disc (chase=red, guard=orange, anchored + tick-updated), waypoint spheres (chase path, color-coded), patrol waypoint markers (yellow), guard waypoint markers (orange, no lines — random order), wander beam + target marker
-- Debug panel (F8 toggle): live NPC status readout, per-visual toggles (disc, stateLabel, chasePath, waypoints, waypointNumbers, nameLabel, wanderBeam) with Toggle All master switch, teleport (spawn zone, NPC current pos, summon NPC to player). Client polls server every 0.5s + push events for instant state changes.
+- Debug panel (F8 toggle): dynamic server-driven NPC list (rebuilds on spawn/despawn), live NPC status readout, per-visual toggles (disc, stateLabel, chasePath, waypoints, waypointNumbers, nameLabel, wanderBeam) with Toggle All master switch, teleport (spawn zone, NPC current pos, summon NPC to player), per-NPC behavior swap buttons. Client polls server every 0.5s + push events for instant state changes. Visual toggle states tracked in `visualToggleStates` map and synced to new NPCs on rebuild.
 - Performance strip (always visible, top-left): FPS, frame time (ms, color-coded green/yellow/red), instance count (3s poll). Independent of F8 panel toggle.
 - Chase path dot toggle uses `_visualizeOverride` pattern in NPCPathfinder so debug panel state persists across `followTarget` restarts during state transitions.
 

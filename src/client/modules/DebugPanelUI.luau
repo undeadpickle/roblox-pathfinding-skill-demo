@@ -356,7 +356,8 @@ function DebugPanelUI.createTeleportGrid(
 ): Frame
 	local grid = Instance.new("Frame")
 	grid.Name = "TeleportGrid"
-	grid.Size = UDim2.new(1, 0, 0, ROW_HEIGHT * 2 + 4)
+	grid.Size = UDim2.fromScale(1, 0)
+	grid.AutomaticSize = Enum.AutomaticSize.Y
 	grid.BackgroundTransparency = 1
 	grid.LayoutOrder = layoutOrder
 
@@ -391,6 +392,102 @@ function DebugPanelUI.createTeleportGrid(
 	end
 
 	return grid
+end
+
+--- Create a row of behavior swap buttons for one NPC.
+--- Returns the row Frame and an update function to change the active highlight.
+function DebugPanelUI.createBehaviorRow(
+	npcDisplayName: string,
+	currentBehavior: string,
+	availableBehaviors: { string },
+	layoutOrder: number,
+	onSwap: (npcDisplayName: string, behaviorType: string) -> ()
+): (Frame, (newBehavior: string) -> ())
+	local activeBehavior = currentBehavior
+
+	local row = Instance.new("Frame")
+	row.Name = npcDisplayName .. "Behavior"
+	row.Size = UDim2.fromScale(1, 0)
+	row.AutomaticSize = Enum.AutomaticSize.Y
+	row.BackgroundTransparency = 1
+	row.LayoutOrder = layoutOrder
+
+	local rowLayout = Instance.new("UIListLayout")
+	rowLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	rowLayout.Padding = UDim.new(0, 2)
+	rowLayout.Parent = row
+
+	-- NPC name label
+	local nameLabel = Instance.new("TextLabel")
+	nameLabel.Name = "NPCName"
+	nameLabel.Size = UDim2.new(1, 0, 0, 18)
+	nameLabel.BackgroundTransparency = 1
+	nameLabel.Text = npcDisplayName
+	nameLabel.TextColor3 = Color3.fromRGB(220, 220, 225)
+	nameLabel.Font = FONTS.HEADING
+	nameLabel.TextSize = TEXT_SIZE
+	nameLabel.TextXAlignment = Enum.TextXAlignment.Left
+	nameLabel.LayoutOrder = 1
+	nameLabel.Parent = row
+
+	-- Button container
+	local btnContainer = Instance.new("Frame")
+	btnContainer.Name = "Buttons"
+	btnContainer.Size = UDim2.fromScale(1, 0)
+	btnContainer.AutomaticSize = Enum.AutomaticSize.Y
+	btnContainer.BackgroundTransparency = 1
+	btnContainer.LayoutOrder = 2
+
+	local btnGrid = Instance.new("UIGridLayout")
+	btnGrid.CellSize = UDim2.new(0.48, 0, 0, ROW_HEIGHT)
+	btnGrid.CellPadding = UDim2.new(0.04, 0, 0, 4)
+	btnGrid.SortOrder = Enum.SortOrder.LayoutOrder
+	btnGrid.Parent = btnContainer
+
+	local buttons: { [string]: TextButton } = {}
+
+	for i, behavior in availableBehaviors do
+		local isActive = behavior == activeBehavior
+		local btn = Instance.new("TextButton")
+		btn.Name = behavior .. "Btn"
+		btn.Text = behavior:sub(1, 1):upper() .. behavior:sub(2)
+		btn.BackgroundColor3 = if isActive then COLORS.PRIMARY else COLORS.SECONDARY
+		btn.BackgroundTransparency = if isActive then 0.3 else 0.7
+		btn.BorderSizePixel = 0
+		btn.TextColor3 = Color3.fromRGB(220, 220, 225)
+		btn.Font = FONTS.BODY
+		btn.TextSize = TEXT_SIZE
+		btn.AutoButtonColor = not isActive
+		btn.LayoutOrder = i
+
+		local btnCorner = Instance.new("UICorner")
+		btnCorner.CornerRadius = UDim.new(0, 4)
+		btnCorner.Parent = btn
+
+		btn.MouseButton1Click:Connect(function()
+			if behavior ~= activeBehavior then
+				onSwap(npcDisplayName, behavior)
+			end
+		end)
+
+		buttons[behavior] = btn
+		btn.Parent = btnContainer
+	end
+
+	btnContainer.Parent = row
+
+	-- Update function: highlights the new active behavior
+	local function updateActive(newBehavior: string)
+		activeBehavior = newBehavior
+		for bType, btn in buttons do
+			local isActive = bType == newBehavior
+			btn.BackgroundColor3 = if isActive then COLORS.PRIMARY else COLORS.SECONDARY
+			btn.BackgroundTransparency = if isActive then 0.3 else 0.7
+			btn.AutoButtonColor = not isActive
+		end
+	end
+
+	return row, updateActive
 end
 
 return DebugPanelUI

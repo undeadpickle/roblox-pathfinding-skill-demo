@@ -507,6 +507,25 @@ function NPCManager.getNPCPosition(displayName: string): Vector3?
 	return rootPart.Position
 end
 
+--- Get an NPC's original spawn position (or nil if not found / no spawn position).
+function NPCManager.getNPCSpawnPosition(displayName: string): Vector3?
+	local entry = activeNPCs[displayName]
+	if not entry then
+		return nil
+	end
+	return entry.spawnPosition
+end
+
+--- Get the list of registered behavior type keys (sorted for stable order).
+function NPCManager.getAvailableBehaviors(): { string }
+	local result = {}
+	for key in BehaviorRegistry do
+		table.insert(result, key)
+	end
+	table.sort(result)
+	return result
+end
+
 --- Teleport an NPC to a world position. Stops current movement first.
 function NPCManager.teleportNPC(displayName: string, position: Vector3): boolean
 	local entry = activeNPCs[displayName]

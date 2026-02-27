@@ -3,7 +3,7 @@
 	DebugService - Server-side handler for debug panel remotes.
 
 	Bridges client debug panel requests into NPCManager methods.
-	Handles: NPC status polling, visual toggling, teleport, state change push.
+	Handles: NPC status polling, visual toggling, teleport, behavior swap, state change push.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -30,7 +30,12 @@ function DebugService.initialize(): ()
 		local character = player.Character
 		local rootPart = character and character:FindFirstChild("HumanoidRootPart")
 		local playerPos = if rootPart and rootPart:IsA("BasePart") then rootPart.Position else Vector3.zero
-		return NPCManager.getAllNPCStatus(playerPos)
+		local status = NPCManager.getAllNPCStatus(playerPos)
+		-- Embed metadata for the client to build dynamic UI
+		status._meta = {
+			availableBehaviors = NPCManager.getAvailableBehaviors(),
+		}
+		return status
 	end
 
 	-- TOGGLE_VISUAL: toggle a debug visual on/off for a specific NPC
@@ -44,26 +49,25 @@ function DebugService.initialize(): ()
 		end)
 
 	-- TELEPORT_TO_NPC: move player's character near an NPC's spawn zone
-	Remotes.getEvent(DebugRemotes.TELEPORT_TO_NPC).OnServerEvent:Connect(function(player: Player, npcKey: unknown)
-		if typeof(npcKey) ~= "string" then
-			log:warn(`Invalid TELEPORT_TO_NPC args from {player.Name}`)
-			return
-		end
+	Remotes.getEvent(DebugRemotes.TELEPORT_TO_NPC).OnServerEvent
+		:Connect(function(player: Player, npcDisplayName: unknown)
+			if typeof(npcDisplayName) ~= "string" then
+				log:warn(`Invalid TELEPORT_TO_NPC args from {player.Name}`)
+				return
+			end
 
-		local spawnPositions = GameConfig.NPC.SPAWN_POSITIONS :: { [string]: Vector3 }
-		local targetPos = spawnPositions[npcKey]
-		if not targetPos then
-			log:warn(`Unknown NPC key for teleport: {npcKey}`)
-			return
-		end
+			local spawnPos = NPCManager.getNPCSpawnPosition(npcDisplayName)
+			if not spawnPos then
+				log:warn(`No spawn position for NPC: {npcDisplayName}`)
+				return
+			end
 
-		local character = player.Character
-		if character then
-			-- Offset so we don't land on top of the NPC
-			character:PivotTo(CFrame.new(targetPos + Vector3.new(5, 0, 5)))
-			log:debug(`Teleported {player.Name} to {npcKey} zone`)
-		end
-	end)
+			local character = player.Character
+			if character then
+				character:PivotTo(CFrame.new(spawnPos + Vector3.new(5, 0, 5)))
+				log:debug(`Teleported {player.Name} to {npcDisplayName} spawn zone`)
+			end
+		end)
 
 	-- TELEPORT_TO_NPC_CURRENT: move player near an NPC's current position (not spawn zone)
 	Remotes.getEvent(DebugRemotes.TELEPORT_TO_NPC_CURRENT).OnServerEvent
@@ -107,6 +111,35 @@ function DebugService.initialize(): ()
 				log:debug(`Teleported {npcDisplayName} to {player.Name}`)
 			else
 				log:warn(`Failed to teleport NPC: {npcDisplayName}`)
+			end
+		end)
+
+	-- Default behavior configs from GameConfig (used when debug panel swaps behaviors)
+	-- Each behavior type needs specific config fields — reusing existing config from
+	-- a different behavior type causes nil field crashes (e.g., guard needs DETECT_INTERVAL).
+	local defaultBehaviorConfigs: { [string]: { [string]: any } } = {
+		chase = GameConfig.NPC.CHASE,
+		patrol = GameConfig.NPC.PATROL,
+		wander = GameConfig.NPC.WANDER,
+		guard = GameConfig.NPC.GUARD,
+	}
+
+	-- SET_BEHAVIOR: swap an NPC's behavior at runtime
+	Remotes.getEvent(DebugRemotes.SET_BEHAVIOR).OnServerEvent
+		:Connect(function(player: Player, npcDisplayName: unknown, behaviorType: unknown)
+			if typeof(npcDisplayName) ~= "string" or typeof(behaviorType) ~= "string" then
+				log:warn(`Invalid SET_BEHAVIOR args from {player.Name}`)
+				return
+			end
+
+			-- Always supply the default config for the target behavior type
+			-- to avoid nil field crashes from incompatible existing configs
+			local config = defaultBehaviorConfigs[behaviorType]
+			local success = NPCManager.setBehavior(npcDisplayName, behaviorType, config)
+			if success then
+				log:info(`{player.Name} swapped {npcDisplayName} to {behaviorType}`)
+			else
+				log:warn(`Failed to swap {npcDisplayName} to {behaviorType}`)
 			end
 		end)
 

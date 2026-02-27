@@ -144,3 +144,7 @@
 - **[Roblox]** Don't expect Command Bar or MCP `require()` to return the same module instance as server scripts. Roblox has three separate require caches during play mode (server scripts, Command Bar, MCP plugin). They share the DataModel (Workspace, models) but not module-local state. To test server APIs at runtime, add test code to the server script itself or use RemoteEvents.
 
 - **[Roblox]** Don't paste ServerScriptService paths into the Command Bar without checking the context dropdown. During play mode, the Command Bar defaults to Client context where SSS children are inaccessible. Switch the dropdown to "Server" first.
+
+## Session: 2026-02-26 — Dynamic Debug Panel (Phase 2)
+
+- **[Architecture]** Don't assume behavior configs are interchangeable when calling `setBehavior` without explicit config. Each behavior type has required fields that others lack (e.g., guard needs `DETECT_INTERVAL`, `PATROL_PAUSE`, `WAYPOINTS`). Omitting config reuses the existing one, which causes nil field crashes — not graceful degradation. Always supply the target behavior's default config from GameConfig when the caller doesn't know the NPC's current config shape.

@@ -2,9 +2,10 @@
 --[[
 	DebugPanel - Client-side debug panel for NPC pathfinding demo.
 
-	Toggle: F9 key (or close button)
+	Toggle: F8 key (or close button)
 	Polls NPC status every 0.5s, listens for state change pushes.
-	Sends visual toggle and teleport commands to server.
+	NPC list is server-driven — dynamically rebuilds when NPCs are added/removed.
+	Sends visual toggle, teleport, and behavior swap commands to server.
 ]]
 
 local Players = game:GetService("Players")
@@ -28,23 +29,42 @@ local player = Players.LocalPlayer
 local STATE_COLORS = GameConfig.NPC.STATE_LABEL.COLORS
 local STATE_DEFAULT_COLOR = GameConfig.NPC.STATE_LABEL.DEFAULT_COLOR
 
--- NPC display order and config
-local NPC_ORDER = {
-	{ key = "CHASE", displayName = GameConfig.NPC.CHASE.DISPLAY_NAME, behaviorType = "chase" },
-	{ key = "PATROL", displayName = GameConfig.NPC.PATROL.DISPLAY_NAME, behaviorType = "patrol" },
-	{ key = "WANDER", displayName = GameConfig.NPC.WANDER.DISPLAY_NAME, behaviorType = "wander" },
-	{ key = "GUARD", displayName = GameConfig.NPC.GUARD.DISPLAY_NAME, behaviorType = "guard" },
-}
-
 -- Toggle key (F9 conflicts with Roblox Developer Console — using F8 instead)
 local TOGGLE_KEY = Enum.KeyCode.F8
 
 local DebugPanel = {}
 
+-- Dynamic NPC list (populated from server status polls)
+local knownNPCs: { { displayName: string, behaviorType: string } } = {}
+
 -- UI references (populated during initialize)
 local screenGui: ScreenGui? = nil
+local contentFrame: ScrollingFrame? = nil
 local statusLabels: { [string]: { state: TextLabel, metrics: TextLabel } } = {}
 local isPolling = false
+
+-- Section references for rebuild
+local statusSection: Frame? = nil
+local teleportSection: Frame? = nil
+local behaviorSection: Frame? = nil
+local behaviorUpdaters: { [string]: (newBehavior: string) -> () } = {}
+local availableBehaviors: { string } = {}
+
+-- Visual toggle state (persists across NPC list rebuilds)
+local toggleDefs = {
+	{ label = "Detection Discs", visualType = "disc", order = 2 },
+	{ label = "State Labels", visualType = "stateLabel", order = 3 },
+	{ label = "Chase Path Dots", visualType = "chasePath", order = 4 },
+	{ label = "Waypoint Markers", visualType = "waypoints", order = 5 },
+	{ label = "Waypoint Numbers", visualType = "waypointNumbers", order = 6 },
+	{ label = "Name Labels", visualType = "nameLabel", order = 7 },
+	{ label = "Wander Beam", visualType = "wanderBeam", order = 8 },
+}
+local visualToggleStates: { [string]: boolean } = {}
+-- Initialize all toggles to on
+for _, def in toggleDefs do
+	visualToggleStates[def.visualType] = true
+end
 
 --- Format metrics line for a given NPC status entry.
 local function formatMetrics(data: { [string]: any }): string
@@ -64,9 +84,208 @@ local function formatMetrics(data: { [string]: any }): string
 	return table.concat(parts, "  |  ")
 end
 
+-- ═══════════════════════════════════════════════════════════
+-- DYNAMIC SECTION BUILDERS
+-- ═══════════════════════════════════════════════════════════
+
+--- Build the NPC status section from the current NPC list.
+local function buildStatusSection(npcList: { { displayName: string, behaviorType: string } }): Frame
+	local section = DebugPanelUI.createSection("NPC Status", 2)
+
+	if #npcList == 0 then
+		local emptyLabel = DebugPanelUI.createSubLabel("No NPCs spawned", 1)
+		emptyLabel.Parent = section
+		return section
+	end
+
+	for i, npcInfo in npcList do
+		local row, stateLabel, metricsLabel = DebugPanelUI.createStatusRow(npcInfo.displayName, i)
+		statusLabels[npcInfo.displayName] = {
+			state = stateLabel,
+			metrics = metricsLabel,
+		}
+		row.Parent = section
+	end
+
+	return section
+end
+
+--- Build the teleport section from the current NPC list.
+local function buildTeleportSection(npcList: { { displayName: string, behaviorType: string } }): Frame
+	local section = DebugPanelUI.createSection("Teleport", 3)
+
+	if #npcList == 0 then
+		local emptyLabel = DebugPanelUI.createSubLabel("No NPCs to teleport to", 1)
+		emptyLabel.Parent = section
+		return section
+	end
+
+	-- Build NPC key arrays (shared format for all grids)
+	local npcKeys: { { key: string, label: string } } = {}
+	for _, npc in npcList do
+		table.insert(npcKeys, { key = npc.displayName, label = npc.displayName })
+	end
+
+	-- Subsection: To Spawn Zone
+	local spawnLabel = DebugPanelUI.createSubLabel("To Spawn Zone", 1)
+	spawnLabel.Parent = section
+
+	local teleportEvent = Remotes.getEvent(DebugRemotes.TELEPORT_TO_NPC)
+	local spawnGrid = DebugPanelUI.createTeleportGrid(npcKeys, 2, function(displayName: string)
+		teleportEvent:FireServer(displayName)
+		log:debug(`Teleporting to {displayName} spawn zone`)
+	end)
+	spawnGrid.Parent = section
+
+	-- Subsection: To NPC (Current Pos)
+	local goToLabel = DebugPanelUI.createSubLabel("To NPC (Current Pos)", 3)
+	goToLabel.Parent = section
+
+	local goToEvent = Remotes.getEvent(DebugRemotes.TELEPORT_TO_NPC_CURRENT)
+	local goToGrid = DebugPanelUI.createTeleportGrid(npcKeys, 4, function(displayName: string)
+		goToEvent:FireServer(displayName)
+		log:debug(`Teleporting to {displayName} current pos`)
+	end)
+	goToGrid.Parent = section
+
+	-- Subsection: Summon NPC to Me
+	local summonLabel = DebugPanelUI.createSubLabel("Summon NPC to Me", 5)
+	summonLabel.Parent = section
+
+	local summonEvent = Remotes.getEvent(DebugRemotes.TELEPORT_NPC_TO_PLAYER)
+	local summonGrid = DebugPanelUI.createTeleportGrid(npcKeys, 6, function(displayName: string)
+		summonEvent:FireServer(displayName)
+		log:debug(`Summoning {displayName} to player`)
+	end)
+	summonGrid.Parent = section
+
+	return section
+end
+
+--- Build the behavior swap section from the current NPC list.
+local function buildBehaviorSection(
+	npcList: { { displayName: string, behaviorType: string } },
+	behaviors: { string }
+): Frame
+	local section = DebugPanelUI.createSection("Behavior", 4)
+	table.clear(behaviorUpdaters)
+
+	if #npcList == 0 or #behaviors == 0 then
+		local emptyLabel = DebugPanelUI.createSubLabel("No NPCs available", 1)
+		emptyLabel.Parent = section
+		return section
+	end
+
+	local setBehaviorEvent = Remotes.getEvent(DebugRemotes.SET_BEHAVIOR)
+
+	for i, npc in npcList do
+		local row, updateFn = DebugPanelUI.createBehaviorRow(
+			npc.displayName,
+			npc.behaviorType,
+			behaviors,
+			i,
+			function(displayName: string, behaviorType: string)
+				setBehaviorEvent:FireServer(displayName, behaviorType)
+				log:debug(`Requesting behavior swap: {displayName} -> {behaviorType}`)
+			end
+		)
+		behaviorUpdaters[npc.displayName] = updateFn
+		row.Parent = section
+	end
+
+	return section
+end
+
+-- ═══════════════════════════════════════════════════════════
+-- DIFF + REBUILD
+-- ═══════════════════════════════════════════════════════════
+
+--- Check if the NPC list from the server differs from our known list.
+--- Returns the sorted list if different, nil if same.
+local function diffNPCList(statusData: { [string]: any }): { { displayName: string, behaviorType: string } }?
+	local serverList: { { displayName: string, behaviorType: string } } = {}
+	for name, data in statusData do
+		if name == "_meta" then
+			continue
+		end
+		table.insert(serverList, { displayName = name, behaviorType = data.behaviorType })
+	end
+	table.sort(serverList, function(a, b)
+		return a.displayName < b.displayName
+	end)
+
+	-- Quick check: same count?
+	if #serverList ~= #knownNPCs then
+		return serverList
+	end
+	-- Check each entry by name (behavior changes don't trigger rebuild)
+	for i, entry in serverList do
+		if knownNPCs[i].displayName ~= entry.displayName then
+			return serverList
+		end
+	end
+	return nil
+end
+
+--- Sync visual toggle states to all known NPCs (called after rebuild).
+local function syncToggleStatesToNPCs(): ()
+	local toggleEvent = Remotes.getEvent(DebugRemotes.TOGGLE_VISUAL)
+	for _, def in toggleDefs do
+		local enabled = visualToggleStates[def.visualType]
+		if enabled ~= nil then
+			for _, npcInfo in knownNPCs do
+				toggleEvent:FireServer(npcInfo.displayName, def.visualType, enabled)
+			end
+		end
+	end
+end
+
+--- Rebuild dynamic sections (status + teleport) when NPC list changes.
+local function rebuildDynamicSections(newList: { { displayName: string, behaviorType: string } }): ()
+	knownNPCs = newList
+
+	-- Clear old status label refs
+	table.clear(statusLabels)
+
+	local content = contentFrame
+	if not content then
+		return
+	end
+
+	-- Destroy old sections
+	if statusSection then
+		statusSection:Destroy()
+	end
+	if teleportSection then
+		teleportSection:Destroy()
+	end
+	if behaviorSection then
+		behaviorSection:Destroy()
+	end
+
+	-- Rebuild
+	statusSection = buildStatusSection(newList)
+	statusSection.Parent = content
+
+	teleportSection = buildTeleportSection(newList)
+	teleportSection.Parent = content
+
+	behaviorSection = buildBehaviorSection(newList, availableBehaviors)
+	behaviorSection.Parent = content
+
+	-- Sync visual toggle states to any new NPCs
+	syncToggleStatesToNPCs()
+
+	log:debug(`Rebuilt panel for {#newList} NPCs`)
+end
+
+-- ═══════════════════════════════════════════════════════════
+-- STATUS UPDATE + POLLING
+-- ═══════════════════════════════════════════════════════════
+
 --- Update status rows with fresh data from server.
 local function updateStatusDisplay(statusData: { [string]: any }): ()
-	for _, npcInfo in NPC_ORDER do
+	for _, npcInfo in knownNPCs do
 		local labels = statusLabels[npcInfo.displayName]
 		if not labels then
 			continue
@@ -81,7 +300,7 @@ local function updateStatusDisplay(statusData: { [string]: any }): ()
 		else
 			labels.state.Text = `{npcInfo.displayName}: --`
 			labels.state.TextColor3 = STATE_DEFAULT_COLOR
-			labels.metrics.Text = "Not spawned"
+			labels.metrics.Text = "Despawned"
 		end
 	end
 end
@@ -102,7 +321,29 @@ local function startPolling(): ()
 			end)
 
 			if ok and result then
+				-- Extract metadata
+				local meta = result._meta
+				if meta and meta.availableBehaviors then
+					availableBehaviors = meta.availableBehaviors
+				end
+
+				-- Check if NPC list changed -> rebuild UI
+				local newList = diffNPCList(result)
+				if newList then
+					rebuildDynamicSections(newList)
+				end
 				updateStatusDisplay(result)
+
+				-- Sync behavior highlights (catches changes from MCP/other tools)
+				for name, data in result do
+					if name == "_meta" then
+						continue
+					end
+					local updater = behaviorUpdaters[name]
+					if updater then
+						updater(data.behaviorType)
+					end
+				end
 			elseif not ok then
 				log:warn(`Status poll failed: {result}`)
 			end
@@ -135,36 +376,30 @@ local function togglePanel(): ()
 	end
 end
 
+-- ═══════════════════════════════════════════════════════════
+-- INITIALIZATION
+-- ═══════════════════════════════════════════════════════════
+
 function DebugPanel.initialize(): ()
 	-- Build UI
 	local gui, _panel = DebugPanelUI.createPanel()
 	screenGui = gui
 
-	local content = _panel:FindFirstChild("Content") :: ScrollingFrame
+	contentFrame = _panel:FindFirstChild("Content") :: ScrollingFrame
 
-	-- Section 1: Visual Toggles
+	-- Section 1: Visual Toggles (static — doesn't depend on NPC list)
 	local visualSection = DebugPanelUI.createSection("Visual Toggles", 1)
 
 	local toggleEvent = Remotes.getEvent(DebugRemotes.TOGGLE_VISUAL)
-
-	-- Each toggle fires a remote for ALL NPCs with that visual type
-	local toggleDefs = {
-		{ label = "Detection Discs", visualType = "disc", order = 2 },
-		{ label = "State Labels", visualType = "stateLabel", order = 3 },
-		{ label = "Chase Path Dots", visualType = "chasePath", order = 4 },
-		{ label = "Waypoint Markers", visualType = "waypoints", order = 5 },
-		{ label = "Waypoint Numbers", visualType = "waypointNumbers", order = 6 },
-		{ label = "Name Labels", visualType = "nameLabel", order = 7 },
-		{ label = "Wander Beam", visualType = "wanderBeam", order = 8 },
-	}
 
 	-- Track update functions so Toggle All can sync them
 	local toggleUpdaters: { (enabled: boolean) -> () } = {}
 
 	for _, def in toggleDefs do
 		local row, updateFn = DebugPanelUI.createToggleRow(def.label, true, def.order, function(enabled: boolean)
-			-- Fire for all NPCs
-			for _, npcInfo in NPC_ORDER do
+			visualToggleStates[def.visualType] = enabled
+			-- Fire for all known NPCs
+			for _, npcInfo in knownNPCs do
 				toggleEvent:FireServer(npcInfo.displayName, def.visualType, enabled)
 			end
 		end)
@@ -178,13 +413,14 @@ function DebugPanel.initialize(): ()
 		true,
 		1,
 		function(enabled: boolean)
-			-- Sync all individual toggle visuals
+			-- Sync all individual toggle visuals + state
 			for _, updater in toggleUpdaters do
 				updater(enabled)
 			end
 			-- Fire remotes for every visual type on every NPC
 			for _, def in toggleDefs do
-				for _, npcInfo in NPC_ORDER do
+				visualToggleStates[def.visualType] = enabled
+				for _, npcInfo in knownNPCs do
 					toggleEvent:FireServer(npcInfo.displayName, def.visualType, enabled)
 				end
 			end
@@ -192,80 +428,9 @@ function DebugPanel.initialize(): ()
 	)
 	toggleAllRow.Parent = visualSection
 
-	visualSection.Parent = content
+	visualSection.Parent = contentFrame
 
-	-- Section 2: NPC Status
-	local statusSection = DebugPanelUI.createSection("NPC Status", 2)
-
-	for i, npcInfo in NPC_ORDER do
-		local row, stateLabel, metricsLabel = DebugPanelUI.createStatusRow(npcInfo.displayName, i)
-		statusLabels[npcInfo.displayName] = {
-			state = stateLabel,
-			metrics = metricsLabel,
-		}
-		row.Parent = statusSection
-	end
-
-	statusSection.Parent = content
-
-	-- Section 3: Teleport
-	local teleportSection = DebugPanelUI.createSection("Teleport", 3)
-
-	local teleportEvent = Remotes.getEvent(DebugRemotes.TELEPORT_TO_NPC)
-	local teleportKeys = {}
-	for _, npcInfo in NPC_ORDER do
-		table.insert(teleportKeys, { key = npcInfo.key, label = npcInfo.key:sub(1, 1) .. npcInfo.key:sub(2):lower() })
-	end
-
-	-- Subsection label: Spawn Zones
-	local spawnLabel = DebugPanelUI.createSubLabel("To Spawn Zone", 1)
-	spawnLabel.Parent = teleportSection
-
-	local teleportGrid = DebugPanelUI.createTeleportGrid(teleportKeys, 2, function(key: string)
-		teleportEvent:FireServer(key)
-		log:debug(`Teleporting to {key} zone`)
-	end)
-	teleportGrid.Parent = teleportSection
-
-	-- Subsection label: Go to NPC (current position)
-	local goToLabel = DebugPanelUI.createSubLabel("To NPC (Current Pos)", 3)
-	goToLabel.Parent = teleportSection
-
-	local goToEvent = Remotes.getEvent(DebugRemotes.TELEPORT_TO_NPC_CURRENT)
-	local goToKeys = {}
-	for _, npcInfo in NPC_ORDER do
-		table.insert(
-			goToKeys,
-			{ key = npcInfo.displayName, label = npcInfo.key:sub(1, 1) .. npcInfo.key:sub(2):lower() }
-		)
-	end
-
-	local goToGrid = DebugPanelUI.createTeleportGrid(goToKeys, 4, function(displayName: string)
-		goToEvent:FireServer(displayName)
-		log:debug(`Teleporting to {displayName} current pos`)
-	end)
-	goToGrid.Parent = teleportSection
-
-	-- Subsection label: Summon NPC to player
-	local summonLabel = DebugPanelUI.createSubLabel("Summon NPC to Me", 5)
-	summonLabel.Parent = teleportSection
-
-	local summonEvent = Remotes.getEvent(DebugRemotes.TELEPORT_NPC_TO_PLAYER)
-	local summonKeys = {}
-	for _, npcInfo in NPC_ORDER do
-		table.insert(
-			summonKeys,
-			{ key = npcInfo.displayName, label = npcInfo.key:sub(1, 1) .. npcInfo.key:sub(2):lower() }
-		)
-	end
-
-	local summonGrid = DebugPanelUI.createTeleportGrid(summonKeys, 6, function(displayName: string)
-		summonEvent:FireServer(displayName)
-		log:debug(`Summoning {displayName} to player`)
-	end)
-	summonGrid.Parent = teleportSection
-
-	teleportSection.Parent = content
+	-- Sections 2 & 3 (Status + Teleport) built dynamically on first poll
 
 	-- Listen for state change pushes (instant updates between polls)
 	local stateChangedEvent = Remotes.getEvent(DebugRemotes.NPC_STATE_CHANGED)
